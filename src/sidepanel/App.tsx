@@ -34,6 +34,13 @@ const DATE_TIME_FORMATTER = new Intl.DateTimeFormat('ko-KR', {
   timeStyle: 'medium',
 })
 const TARGET_SITE_BY_ID = new Map(targetSites.map((site) => [site.id, site]))
+const STATUS_LABEL_BY_KIND: Record<StatusKind, string> = {
+  idle: '안내',
+  loading: '진행 중',
+  success: '완료',
+  warning: '주의',
+  error: '오류',
+}
 
 function getInitialPrivacyMode(): boolean {
   if (typeof window === 'undefined') {
@@ -371,7 +378,12 @@ function App() {
 
   const renderedItems = useMemo(() => {
     if (items.length === 0) {
-      return <li className="empty-row">아직 저장된 아이템이 없습니다.</li>
+      return (
+        <li className="empty-row">
+          <p>아직 저장된 아이템이 없습니다.</p>
+          <p>사이트를 열고 크롤을 실행하면 결과가 여기에 쌓입니다.</p>
+        </li>
+      )
     }
 
     return items.map((item) => (
@@ -395,15 +407,26 @@ function App() {
               target="_blank"
               rel="noreferrer"
               className="item-title"
+              title={item.title}
             >
               {item.title}
             </a>
-            <a href={item.url} target="_blank" rel="noreferrer" className="item-url">
+            <a
+              href={item.url}
+              target="_blank"
+              rel="noreferrer"
+              className="item-url"
+              title={item.url}
+            >
               {item.url}
             </a>
             <div className="item-meta">
-              <span>{formatDateTime(item.crawledAt)}</span>
-              {item.summary ? <span>{item.summary}</span> : null}
+              <span className="meta-tag">{formatDateTime(item.crawledAt)}</span>
+              {item.summary ? (
+                <span className="item-summary" title={item.summary}>
+                  {item.summary}
+                </span>
+              ) : null}
             </div>
             <div className="item-actions">
               <button
@@ -426,12 +449,22 @@ function App() {
   return (
     <main className="panel-shell">
       <header className="panel-header">
-        <h1>Maltlock Crawler</h1>
-        <p>선택 사이트: {activeSiteName}</p>
+        <div className="panel-header-top">
+          <h1>Maltlock Crawler</h1>
+          <span className="header-badge">Side Panel</span>
+        </div>
+        <p className="panel-subtitle">탭 열기 → 크롤 실행 → 저장 결과 검토</p>
+        <div className="header-meta">
+          <span className="meta-pill">선택: {activeSiteName}</span>
+          <span className="meta-pill">저장: {items.length}건</span>
+        </div>
       </header>
 
       <section className="section-block">
-        <h2>대상 사이트</h2>
+        <div className="section-heading">
+          <h2>1. 대상 사이트</h2>
+          <p>버튼을 누르면 해당 사이트 탭을 열고 현재 대상으로 설정합니다.</p>
+        </div>
         <div className="site-grid">
           {targetSites.map((site) => (
             <button
@@ -449,7 +482,7 @@ function App() {
         {activeSite ? (
           <div className="site-url-editor">
             <label className="site-url-label" htmlFor="site-url-input">
-              {activeSite.name} URL
+              {activeSite.name} URL 커스터마이즈
             </label>
             <div className="site-url-row">
               <input
@@ -478,7 +511,10 @@ function App() {
       </section>
 
       <section className="section-block">
-        <h2>크롤 실행</h2>
+        <div className="section-heading">
+          <h2>2. 크롤 실행</h2>
+          <p>활성 탭의 HTML을 수집해 파싱 후 로컬 DB에 저장합니다.</p>
+        </div>
         <button
           type="button"
           className="crawl-button"
@@ -487,14 +523,24 @@ function App() {
           }}
           disabled={isCrawling}
         >
-          {isCrawling ? '크롤링 중...' : '크롤'}
+          {isCrawling ? '크롤링 중...' : '지금 크롤 실행'}
         </button>
-        <p className={`status-line status-${status.kind}`}>{status.message}</p>
+        <p
+          className={`status-line status-${status.kind}`}
+          role="status"
+          aria-live="polite"
+        >
+          <span className="status-label">{STATUS_LABEL_BY_KIND[status.kind]}</span>
+          <span>{status.message}</span>
+        </p>
       </section>
 
       <section className="section-block list-block">
         <div className="list-header">
-          <h2>저장 리스트</h2>
+          <div className="section-heading">
+            <h2>3. 저장 리스트</h2>
+            <p>최근 수집 결과를 확인하고 필요 없는 아이템을 정리하세요.</p>
+          </div>
           <div className="list-controls">
             <button
               type="button"
@@ -508,15 +554,15 @@ function App() {
                 ? '사생활 모드 적용 중...'
                 : `사생활 모드 ${isPrivacyMode ? 'ON' : 'OFF'}`}
             </button>
-            {latestRun ? (
-              <span className="run-meta">
-                최근 실행: {formatDateTime(latestRun.finishedAt)} / 상태: {latestRun.status}
-              </span>
-            ) : (
-              <span className="run-meta">실행 기록 없음</span>
-            )}
           </div>
         </div>
+        {latestRun ? (
+          <p className="run-meta">
+            최근 실행: {formatDateTime(latestRun.finishedAt)} · 상태: {latestRun.status}
+          </p>
+        ) : (
+          <p className="run-meta">최근 실행 기록이 없습니다.</p>
+        )}
 
         <ul className="item-list">{renderedItems}</ul>
       </section>
