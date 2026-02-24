@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { targetSites } from '../config/targets'
 import {
-  clearAllData,
   deleteCrawledItem,
   listCrawlRunsBySite,
   listItemsBySite,
@@ -30,6 +29,11 @@ const DEFAULT_STATUS: StatusState = {
 
 const PRIVACY_MODE_STORAGE_KEY = 'maltlock:privacy-mode'
 const SITE_URL_STORAGE_KEY = 'maltlock:site-urls'
+const DATE_TIME_FORMATTER = new Intl.DateTimeFormat('ko-KR', {
+  dateStyle: 'short',
+  timeStyle: 'medium',
+})
+const TARGET_SITE_BY_ID = new Map(targetSites.map((site) => [site.id, site]))
 
 function getInitialPrivacyMode(): boolean {
   if (typeof window === 'undefined') {
@@ -80,10 +84,7 @@ function getInitialSiteUrls(): Record<string, string> {
 }
 
 function formatDateTime(timestamp: number): string {
-  return new Intl.DateTimeFormat('ko-KR', {
-    dateStyle: 'short',
-    timeStyle: 'medium',
-  }).format(new Date(timestamp))
+  return DATE_TIME_FORMATTER.format(new Date(timestamp))
 }
 
 function mapError(code: CrawlErrorCode): string {
@@ -126,17 +127,12 @@ function App() {
   const [status, setStatus] = useState<StatusState>(DEFAULT_STATUS)
   const [isCrawling, setIsCrawling] = useState(false)
   const [isPrivacyMode, setIsPrivacyMode] = useState(getInitialPrivacyMode)
+  const [isTogglingPrivacyMode, setIsTogglingPrivacyMode] = useState(false)
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null)
-  const [isClearingData, setIsClearingData] = useState(false)
   const initialPrivacyModeRef = useRef(isPrivacyMode)
 
-  const activeSite = useMemo(() => {
-    return targetSites.find((site) => site.id === activeSiteId)
-  }, [activeSiteId])
-
-  const activeSiteName = useMemo(() => {
-    return activeSite?.name ?? '-'
-  }, [activeSite])
+  const activeSite = useMemo(() => TARGET_SITE_BY_ID.get(activeSiteId), [activeSiteId])
+  const activeSiteName = activeSite?.name ?? '-'
 
   const activeSiteUrl = useMemo(() => {
     if (!activeSite) {
@@ -158,10 +154,16 @@ function App() {
   }, [isPrivacyMode])
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(SITE_URL_STORAGE_KEY, JSON.stringify(siteUrls))
-    } catch {
-      // Ignore persistence errors and keep in-memory state.
+    const timeoutId = window.setTimeout(() => {
+      try {
+        window.localStorage.setItem(SITE_URL_STORAGE_KEY, JSON.stringify(siteUrls))
+      } catch {
+        // Ignore persistence errors and keep in-memory state.
+      }
+    }, 200)
+
+    return () => {
+      window.clearTimeout(timeoutId)
     }
   }, [siteUrls])
 
@@ -191,7 +193,7 @@ function App() {
   )
 
   async function handleOpenSite(siteId: string): Promise<void> {
-    const site = targetSites.find((targetSite) => targetSite.id === siteId)
+    const site = TARGET_SITE_BY_ID.get(siteId)
     const siteName = site?.name ?? siteId
     const targetUrl = (siteUrls[siteId] ?? site?.url ?? '').trim()
     setActiveSiteId(siteId)
@@ -263,39 +265,51 @@ function App() {
   }
 
   async function handleTogglePrivacyMode(): Promise<void> {
+    if (isTogglingPrivacyMode) {
+      return
+    }
+
+    const previousValue = isPrivacyMode
     const nextValue = !isPrivacyMode
+    setIsTogglingPrivacyMode(true)
     setIsPrivacyMode(nextValue)
-    const response = await sendRuntimeRequest<SetPrivacyScreenBlurResult>({
-      type: 'SET_PRIVACY_SCREEN_BLUR',
-      payload: { enabled: nextValue },
-    })
 
-    if (!response.ok) {
-      setStatus({
-        kind: 'warning',
-        message: `${mapError(response.error.code)} 권한 또는 탭 상태를 확인하세요.`,
+    try {
+      const response = await sendRuntimeRequest<SetPrivacyScreenBlurResult>({
+        type: 'SET_PRIVACY_SCREEN_BLUR',
+        payload: { enabled: nextValue },
       })
-      return
-    }
 
-    if (nextValue && response.data.appliedTabCount === 0) {
+      if (!response.ok) {
+        setIsPrivacyMode(previousValue)
+        setStatus({
+          kind: 'warning',
+          message: `${mapError(response.error.code)} 권한 또는 탭 상태를 확인하세요.`,
+        })
+        return
+      }
+
+      if (nextValue && response.data.appliedTabCount === 0) {
+        setStatus({
+          kind: 'warning',
+          message:
+            '사생활 모드 ON: 리스트 이미지는 숨겼지만, 현재 탭에는 블러를 적용하지 못했습니다. 일반 웹페이지 탭에서 다시 시도하세요.',
+        })
+        return
+      }
+
       setStatus({
-        kind: 'warning',
-        message:
-          '사생활 모드 ON: 리스트 이미지는 숨겼지만, 현재 탭에는 블러를 적용하지 못했습니다. 일반 웹페이지 탭에서 다시 시도하세요.',
+        kind: 'success',
+        message: nextValue
+          ? '사생활 모드 ON: 미리보기 이미지를 숨기고 현재 탭 화면을 흐리게 처리합니다.'
+          : '사생활 모드 OFF: 미리보기 이미지와 탭 화면을 원래대로 표시합니다.',
       })
-      return
+    } finally {
+      setIsTogglingPrivacyMode(false)
     }
-
-    setStatus({
-      kind: 'success',
-      message: nextValue
-        ? '사생활 모드 ON: 미리보기 이미지를 숨기고 현재 탭 화면을 흐리게 처리합니다.'
-        : '사생활 모드 OFF: 미리보기 이미지와 탭 화면을 원래대로 표시합니다.',
-    })
   }
 
-  async function handleDeleteItem(itemId: string): Promise<void> {
+  const handleDeleteItem = useCallback(async (itemId: string): Promise<void> => {
     setDeletingItemId(itemId)
 
     try {
@@ -312,37 +326,7 @@ function App() {
     } finally {
       setDeletingItemId(null)
     }
-  }
-
-  async function handleClearAllData(): Promise<void> {
-    if (isClearingData) {
-      return
-    }
-
-    const confirmed = window.confirm(
-      '테스트용 DB 초기화를 실행할까요? 저장된 아이템과 실행 기록이 모두 삭제됩니다.',
-    )
-    if (!confirmed) {
-      return
-    }
-
-    setIsClearingData(true)
-
-    try {
-      await clearAllData()
-      setStatus({
-        kind: 'success',
-        message: 'DB 초기화를 완료했습니다. 저장 데이터와 실행 기록이 모두 삭제되었습니다.',
-      })
-    } catch {
-      setStatus({
-        kind: 'error',
-        message: 'DB 초기화에 실패했습니다. 다시 시도하세요.',
-      })
-    } finally {
-      setIsClearingData(false)
-    }
-  }
+  }, [])
 
   function handleSiteUrlChange(siteId: string, value: string): void {
     setSiteUrls((previous) => ({
@@ -352,7 +336,7 @@ function App() {
   }
 
   function handleResetSiteUrl(siteId: string): void {
-    const defaultUrl = targetSites.find((site) => site.id === siteId)?.url
+    const defaultUrl = TARGET_SITE_BY_ID.get(siteId)?.url
     if (!defaultUrl) {
       return
     }
@@ -384,6 +368,60 @@ function App() {
       })
     })
   }, [])
+
+  const renderedItems = useMemo(() => {
+    if (items.length === 0) {
+      return <li className="empty-row">아직 저장된 아이템이 없습니다.</li>
+    }
+
+    return items.map((item) => (
+      <li key={item.id} className="item-row">
+        <div className={`item-main ${isPrivacyMode ? 'item-main-privacy' : ''}`}>
+          {!isPrivacyMode ? (
+            item.previewImageUrl ? (
+              <img
+                src={item.previewImageUrl}
+                alt={item.title}
+                className="item-preview"
+                loading="lazy"
+              />
+            ) : (
+              <div className="item-preview item-preview-empty">No Image</div>
+            )
+          ) : null}
+          <div className="item-content">
+            <a
+              href={getTitleLinkUrl(item)}
+              target="_blank"
+              rel="noreferrer"
+              className="item-title"
+            >
+              {item.title}
+            </a>
+            <a href={item.url} target="_blank" rel="noreferrer" className="item-url">
+              {item.url}
+            </a>
+            <div className="item-meta">
+              <span>{formatDateTime(item.crawledAt)}</span>
+              {item.summary ? <span>{item.summary}</span> : null}
+            </div>
+            <div className="item-actions">
+              <button
+                type="button"
+                className="delete-button"
+                onClick={() => {
+                  void handleDeleteItem(item.id)
+                }}
+                disabled={deletingItemId === item.id}
+              >
+                {deletingItemId === item.id ? '삭제 중...' : '삭제'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </li>
+    ))
+  }, [deletingItemId, handleDeleteItem, isPrivacyMode, items])
 
   return (
     <main className="panel-shell">
@@ -464,18 +502,11 @@ function App() {
               onClick={() => {
                 void handleTogglePrivacyMode()
               }}
+              disabled={isTogglingPrivacyMode}
             >
-              사생활 모드 {isPrivacyMode ? 'ON' : 'OFF'}
-            </button>
-            <button
-              type="button"
-              className="clear-db-button"
-              onClick={() => {
-                void handleClearAllData()
-              }}
-              disabled={isClearingData}
-            >
-              {isClearingData ? '초기화 중...' : 'DB 초기화(테스트)'}
+              {isTogglingPrivacyMode
+                ? '사생활 모드 적용 중...'
+                : `사생활 모드 ${isPrivacyMode ? 'ON' : 'OFF'}`}
             </button>
             {latestRun ? (
               <span className="run-meta">
@@ -487,59 +518,7 @@ function App() {
           </div>
         </div>
 
-        <ul className="item-list">
-          {items.length === 0 ? (
-            <li className="empty-row">아직 저장된 아이템이 없습니다.</li>
-          ) : (
-            items.map((item) => (
-              <li key={item.id} className="item-row">
-                <div className={`item-main ${isPrivacyMode ? 'item-main-privacy' : ''}`}>
-                  {!isPrivacyMode ? (
-                    item.previewImageUrl ? (
-                      <img
-                        src={item.previewImageUrl}
-                        alt={item.title}
-                        className="item-preview"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div className="item-preview item-preview-empty">No Image</div>
-                    )
-                  ) : null}
-                  <div className="item-content">
-                    <a
-                      href={getTitleLinkUrl(item)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="item-title"
-                    >
-                      {item.title}
-                    </a>
-                    <a href={item.url} target="_blank" rel="noreferrer" className="item-url">
-                      {item.url}
-                    </a>
-                    <div className="item-meta">
-                      <span>{formatDateTime(item.crawledAt)}</span>
-                      {item.summary ? <span>{item.summary}</span> : null}
-                    </div>
-                    <div className="item-actions">
-                      <button
-                        type="button"
-                        className="delete-button"
-                        onClick={() => {
-                          void handleDeleteItem(item.id)
-                        }}
-                        disabled={deletingItemId === item.id}
-                      >
-                        {deletingItemId === item.id ? '삭제 중...' : '삭제'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </li>
-            ))
-          )}
-        </ul>
+        <ul className="item-list">{renderedItems}</ul>
       </section>
     </main>
   )

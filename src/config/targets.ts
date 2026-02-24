@@ -62,6 +62,19 @@ function toPatternRegex(pattern: string): RegExp {
   return new RegExp(`^${escaped}$`);
 }
 
+const patternRegexCache = new Map<string, RegExp>();
+
+function getPatternRegex(pattern: string): RegExp {
+  const cached = patternRegexCache.get(pattern);
+  if (cached) {
+    return cached;
+  }
+
+  const compiled = toPatternRegex(pattern);
+  patternRegexCache.set(pattern, compiled);
+  return compiled;
+}
+
 function sameOrigin(first: string, second: string): boolean {
   try {
     return new URL(first).origin === new URL(second).origin;
@@ -84,6 +97,6 @@ export function siteMatchesUrl(
   }
 
   return site.matchPatterns.some((pattern) =>
-    toPatternRegex(pattern).test(url),
+    getPatternRegex(pattern).test(url),
   );
 }

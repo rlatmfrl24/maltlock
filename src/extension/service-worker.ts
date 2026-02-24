@@ -228,12 +228,14 @@ async function crawlActiveTab(
     let parsedItems
     try {
       parsedItems = parseByParserId(site.parserId, collected.html, collected.tabUrl)
-      console.info('[maltlock] parse result', {
-        parserId: site.parserId,
-        tabUrl: collected.tabUrl,
-        parsedCount: parsedItems.length,
-        htmlLength: collected.html.length,
-      })
+      if (import.meta.env.DEV) {
+        console.info('[maltlock] parse result', {
+          parserId: site.parserId,
+          tabUrl: collected.tabUrl,
+          parsedCount: parsedItems.length,
+          htmlLength: collected.html.length,
+        })
+      }
     } catch (error) {
       throw new CrawlFailure(
         'PARSE_FAILED',

@@ -204,21 +204,6 @@ body {
   color: #8f1f1f;
 }
 
-.clear-db-button {
-  border: 1px solid #d7a5a5;
-  background: #fff5f5;
-  color: #8f1f1f;
-  border-radius: 8px;
-  padding: 6px 10px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.clear-db-button:disabled {
-  opacity: 0.6;
-  cursor: progress;
-}
-
 .run-meta {
   font-size: 11px;
   color: #4d5d73;

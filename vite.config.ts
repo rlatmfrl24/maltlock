@@ -5,6 +5,27 @@ import manifest from './src/extension/manifest'
 
 export default defineConfig({
   plugins: [react(), crx({ manifest })],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) {
+            return undefined
+          }
+
+          if (id.includes('react')) {
+            return 'vendor-react'
+          }
+
+          if (id.includes('dexie')) {
+            return 'vendor-dexie'
+          }
+
+          return 'vendor'
+        },
+      },
+    },
+  },
   test: {
     globals: true,
     environment: 'node',

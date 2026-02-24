@@ -23,7 +23,14 @@ pnpm dev
 pnpm build
 pnpm lint
 pnpm test
+pnpm test:e2e
 ```
+
+## E2E 테스트 (Playwright)
+1. `pnpm exec playwright install chromium`
+2. `pnpm test:e2e`
+
+- 확장 로딩 제약으로 인해 E2E는 headed Chromium으로 실행됩니다.
 
 ## 로컬 설치(Chrome)
 1. `pnpm build`
