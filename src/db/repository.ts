@@ -13,6 +13,20 @@ function normalizeUrl(input: string): string {
   }
 }
 
+function normalizePreviewImageUrl(input: string | undefined): string | undefined {
+  if (!input) {
+    return undefined
+  }
+
+  const trimmed = input.trim()
+
+  if (!trimmed || trimmed.startsWith('data:')) {
+    return undefined
+  }
+
+  return normalizeUrl(trimmed)
+}
+
 function clipSnippet(input: string | undefined): string | undefined {
   if (!input) {
     return undefined
@@ -29,6 +43,23 @@ function clipSnippet(input: string | undefined): string | undefined {
   }
 
   return `${normalized.slice(0, MAX_SNIPPET_LENGTH - 3)}...`
+}
+
+function dedupeByItemId(items: CrawledItem[]): CrawledItem[] {
+  const deduped = new Map<string, CrawledItem>()
+
+  for (const item of items) {
+    // Keep the latest value when the same id appears multiple times in one crawl batch.
+    deduped.set(item.id, item)
+  }
+
+  return [...deduped.values()]
+}
+
+export interface UpsertCrawledItemsResult {
+  items: CrawledItem[]
+  insertedCount: number
+  updatedCount: number
 }
 
 export function createItemId(siteId: string, url: string, title: string): string {
@@ -53,6 +84,7 @@ function normalizeParsedItem(
     siteId,
     title,
     url,
+    previewImageUrl: normalizePreviewImageUrl(item.previewImageUrl),
     summary: item.summary?.trim() || undefined,
     price: item.price,
     rawHtmlSnippet: clipSnippet(item.rawHtmlSnippet),
@@ -64,17 +96,30 @@ export async function upsertCrawledItems(
   siteId: string,
   items: ParsedItem[],
   crawledAt = Date.now(),
-): Promise<CrawledItem[]> {
+): Promise<UpsertCrawledItemsResult> {
   const normalized = items
     .map((item) => normalizeParsedItem(siteId, item, crawledAt))
     .filter((item): item is CrawledItem => item !== null)
+  const dedupedNormalized = dedupeByItemId(normalized)
 
-  if (normalized.length === 0) {
-    return []
+  if (dedupedNormalized.length === 0) {
+    return {
+      items: [],
+      insertedCount: 0,
+      updatedCount: 0,
+    }
   }
 
-  await db.items.bulkPut(normalized)
-  return normalized
+  const existingItems = await db.items.bulkGet(dedupedNormalized.map((item) => item.id))
+  const updatedCount = existingItems.filter((item) => item !== undefined).length
+  const insertedCount = dedupedNormalized.length - updatedCount
+
+  await db.items.bulkPut(dedupedNormalized)
+  return {
+    items: dedupedNormalized,
+    insertedCount,
+    updatedCount,
+  }
 }
 
 export async function listItemsBySite(
@@ -87,6 +132,10 @@ export async function listItemsBySite(
     .reverse()
     .limit(limit)
     .toArray()
+}
+
+export async function deleteCrawledItem(itemId: string): Promise<void> {
+  await db.items.delete(itemId)
 }
 
 export async function saveCrawlRun(run: CrawlRun): Promise<void> {

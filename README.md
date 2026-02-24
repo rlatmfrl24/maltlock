@@ -34,8 +34,20 @@ pnpm test
 6. 확장 아이콘 클릭 -> 우측 Side Panel 열림
 
 ## 타겟 사이트
-- Hacker News (`https://news.ycombinator.com/*`)
-- DEV.to Latest (`https://dev.to/*`)
+- KissJAV Weekly Popular (`https://kissjav.com/most-popular/?sort_by=video_viewed_week`)
+- MissAV Weekly Views (`https://missav123.to/ko/all?sort=weekly_views`)
+- TwiDouga Ranking T1 (`https://www.twidouga.net/ko/ranking_t1.php`)
+- TorrentBot Topic Top20 (`https://torrentbot230.site/topic/index?top=20`)
+- Kone Pornvideo Hot (`https://kone.gg/s/pornvideo?mode=hot`)
+
+## 크롤링 추출 필드
+- 제목 (`title`)
+- 영상 URL (`url`)
+- 미리보기 이미지 URL (`previewImageUrl`)
+
+## 사생활 모드 참고
+- 사생활 모드의 브라우저 화면 블러는 일반 웹페이지(`http/https`) 탭에서 동작합니다.
+- 브라우저 내부 페이지(`chrome://`, 확장 스토어 등)는 보안 정책상 블러 적용이 제한됩니다.
 
 ## 문서
 - 기획/개발 프로세스: `docs/PROJECT_GUIDE.md`

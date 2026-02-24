@@ -1,13 +1,17 @@
 import { defineManifest } from '@crxjs/vite-plugin'
 import { hostMatchPatterns } from '../config/targets'
 
+const privacyBlurHostPermissions = ['http://*/*', 'https://*/*']
+
 export default defineManifest({
   manifest_version: 3,
   name: 'Maltlock Side Panel Crawler',
   version: '0.1.0',
   description: '사이트별 수동 크롤링과 로컬 저장을 제공하는 Side Panel 확장',
-  permissions: ['tabs', 'scripting', 'sidePanel', 'storage'],
-  host_permissions: hostMatchPatterns,
+  permissions: ['tabs', 'scripting', 'sidePanel', 'storage', 'activeTab'],
+  host_permissions: Array.from(
+    new Set([...hostMatchPatterns, ...privacyBlurHostPermissions]),
+  ),
   action: {
     default_title: 'Open Maltlock Side Panel',
   },

@@ -3,6 +3,7 @@ export type CrawlErrorCode =
   | 'TAB_URL_MISMATCH'
   | 'CONTENT_SCRIPT_UNAVAILABLE'
   | 'PARSE_FAILED'
+  | 'PRIVACY_BLUR_FAILED'
   | 'NO_ITEMS'
   | 'INVALID_REQUEST'
   | 'UNKNOWN'
@@ -18,6 +19,7 @@ export interface TargetSite {
 export interface ParsedItem {
   title: string
   url: string
+  previewImageUrl?: string
   summary?: string
   price?: number
   rawHtmlSnippet?: string
@@ -28,6 +30,7 @@ export interface CrawledItem {
   siteId: string
   title: string
   url: string
+  previewImageUrl?: string
   summary?: string
   price?: number
   rawHtmlSnippet?: string
@@ -46,10 +49,16 @@ export interface CrawlRun {
 
 export interface OpenTargetSitePayload {
   siteId: string
+  targetUrl?: string
 }
 
 export interface CrawlActiveTabPayload {
   siteId: string
+  targetUrl?: string
+}
+
+export interface SetPrivacyScreenBlurPayload {
+  enabled: boolean
 }
 
 export interface CrawlResultPayload {
@@ -74,6 +83,11 @@ export interface CrawlActiveTabMessage {
   payload: CrawlActiveTabPayload
 }
 
+export interface SetPrivacyScreenBlurMessage {
+  type: 'SET_PRIVACY_SCREEN_BLUR'
+  payload: SetPrivacyScreenBlurPayload
+}
+
 export interface CrawlResultMessage {
   type: 'CRAWL_RESULT'
   payload: CrawlResultPayload
@@ -84,7 +98,10 @@ export interface CrawlErrorMessage {
   payload: CrawlErrorPayload
 }
 
-export type RuntimeRequestMessage = OpenTargetSiteMessage | CrawlActiveTabMessage
+export type RuntimeRequestMessage =
+  | OpenTargetSiteMessage
+  | CrawlActiveTabMessage
+  | SetPrivacyScreenBlurMessage
 export type RuntimeEventMessage = CrawlResultMessage | CrawlErrorMessage
 export type RuntimeMessage = RuntimeRequestMessage | RuntimeEventMessage
 
@@ -100,8 +117,14 @@ export interface CrawlSummary {
   tabUrl: string
   parsedCount: number
   storedCount: number
+  updatedCount: number
   status: 'success' | 'partial'
   runId: string
+}
+
+export interface SetPrivacyScreenBlurResult {
+  enabled: boolean
+  appliedTabCount: number
 }
 
 export interface RuntimeSuccessResponse<T> {

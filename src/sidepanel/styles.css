@@ -1,23 +1,37 @@
 :root {
   color: #0e1c2f;
   background: #f4f7fb;
-  font-family: 'Segoe UI', 'Apple SD Gothic Neo', sans-serif;
+  font-family: "Segoe UI", "Apple SD Gothic Neo", sans-serif;
 }
 
 * {
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
   margin: 0;
   min-width: 360px;
-  background: radial-gradient(circle at top right, #dcecff 0%, #f4f7fb 45%, #eef3fa 100%);
+  background: radial-gradient(
+    circle at top right,
+    #dcecff 0%,
+    #f4f7fb 45%,
+    #eef3fa 100%
+  );
   color: #0e1c2f;
+  overflow: hidden;
 }
 
 .panel-shell {
   padding: 12px;
-  display: grid;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
 }
 
@@ -54,8 +68,45 @@ body {
 
 .site-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
+}
+
+.site-url-editor {
+  margin-top: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.site-url-label {
+  font-size: 12px;
+  color: #3d5571;
+}
+
+.site-url-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.site-url-input {
+  width: 100%;
+  border: 1px solid #bfd0e8;
+  background: #f8fbff;
+  color: #133d6b;
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-size: 12px;
+}
+
+.site-url-reset {
+  border: 1px solid #bfd0e8;
+  background: #f5f9ff;
+  color: #124173;
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .chip {
@@ -117,29 +168,27 @@ body {
 }
 
 .list-block {
-  min-height: 320px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .list-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
-}
-
-.run-meta {
-  font-size: 11px;
-  color: #4d5d73;
-}
-
-.tab-row {
-  margin-top: 8px;
-  display: flex;
-  gap: 6px;
   flex-wrap: wrap;
 }
 
-.tab-button {
+.list-controls {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+
+.privacy-toggle {
   border: 1px solid #bfd0e8;
   background: #f5f9ff;
   color: #124173;
@@ -149,10 +198,30 @@ body {
   cursor: pointer;
 }
 
-.tab-active {
-  background: #0f4f94;
-  color: #ffffff;
-  border-color: #0f4f94;
+.privacy-toggle-on {
+  border-color: #8f1f1f;
+  background: #fef0f0;
+  color: #8f1f1f;
+}
+
+.clear-db-button {
+  border: 1px solid #d7a5a5;
+  background: #fff5f5;
+  color: #8f1f1f;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.clear-db-button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.run-meta {
+  font-size: 11px;
+  color: #4d5d73;
 }
 
 .item-list {
@@ -161,7 +230,8 @@ body {
   list-style: none;
   display: grid;
   gap: 8px;
-  max-height: 330px;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
 }
 
@@ -170,6 +240,37 @@ body {
   border-radius: 8px;
   padding: 8px;
   background: #fdfefe;
+}
+
+.item-main {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.item-main-privacy {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.item-preview {
+  width: 110px;
+  height: 62px;
+  border-radius: 6px;
+  border: 1px solid #c9d7ec;
+  object-fit: cover;
+  background: #e9f0fa;
+}
+
+.item-preview-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6a7c94;
+  font-size: 11px;
+}
+
+.item-content {
+  min-width: 0;
 }
 
 .item-title {
@@ -184,12 +285,46 @@ body {
   text-decoration: underline;
 }
 
+.item-url {
+  display: block;
+  margin-top: 4px;
+  color: #355b83;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-decoration: none;
+}
+
+.item-url:hover {
+  text-decoration: underline;
+}
+
 .item-meta {
   margin-top: 6px;
   display: grid;
   gap: 2px;
   font-size: 11px;
   color: #52647b;
+}
+
+.item-actions {
+  margin-top: 8px;
+}
+
+.delete-button {
+  border: 1px solid #d7a5a5;
+  background: #fff5f5;
+  color: #8f1f1f;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.delete-button:disabled {
+  opacity: 0.6;
+  cursor: progress;
 }
 
 .empty-row {
