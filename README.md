@@ -1,73 +1,42 @@
-# React + TypeScript + Vite
+# Maltlock Chrome Side Panel Crawler
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + TypeScript + Vite 기반의 Chrome MV3 확장입니다.
 
-Currently, two official plugins are available:
+## 구현 범위
+- Side Panel UI
+- 사이트 버튼 클릭 시 지정 URL 탭 오픈
+- 수동 크롤 버튼으로 활성 탭 HTML 수집
+- 사이트별 TS 파서로 아이템 생성
+- IndexedDB(Dexie) 로컬 저장
+- 사이트별 탭 리스트 표시
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## 기술 스택
+- React 19
+- TypeScript
+- Vite 6 + @crxjs/vite-plugin
+- Dexie / dexie-react-hooks
+- Vitest
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## 개발 명령어
+```bash
+pnpm dev
+pnpm build
+pnpm lint
+pnpm test
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## 로컬 설치(Chrome)
+1. `pnpm build`
+2. Chrome에서 `chrome://extensions` 이동
+3. 우상단 `개발자 모드` 활성화
+4. `압축해제된 확장 프로그램을 로드합니다` 클릭
+5. 프로젝트의 `dist` 폴더 선택
+6. 확장 아이콘 클릭 -> 우측 Side Panel 열림
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## 타겟 사이트
+- Hacker News (`https://news.ycombinator.com/*`)
+- DEV.to Latest (`https://dev.to/*`)
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+## 문서
+- 기획/개발 프로세스: `docs/PROJECT_GUIDE.md`
+- 바이브 코딩 가이드: `docs/VIBE_CODING_GUIDE.md`
