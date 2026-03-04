@@ -104,14 +104,17 @@ async function openTargetSite(
       )
     }
 
-    const tab = await chrome.tabs.create({
-      url: targetUrl ?? site.url,
+    const nextUrl = targetUrl ?? site.url
+    const activeTab = await getActiveTab()
+    const tab = await chrome.tabs.update(activeTab.id, {
+      url: nextUrl,
       active: true,
     })
+    const updatedTabId = tab?.id ?? activeTab.id
 
-    if (!tab.id) {
+    if (!updatedTabId) {
       return errorResponse(
-        new CrawlFailure('TAB_NOT_FOUND', '새 탭을 생성할 수 없습니다.'),
+        new CrawlFailure('TAB_NOT_FOUND', '현재 탭을 이동할 수 없습니다.'),
       )
     }
 
@@ -119,8 +122,8 @@ async function openTargetSite(
       ok: true,
       data: {
         siteId: site.id,
-        tabId: tab.id,
-        url: targetUrl ?? site.url,
+        tabId: updatedTabId,
+        url: nextUrl,
       },
     }
   } catch (error) {
@@ -260,7 +263,7 @@ async function crawlActiveTab(
         tabUrl: collected.tabUrl,
         parsedCount: parsedItems.length,
         storedCount: upserted.insertedCount,
-        updatedCount: upserted.updatedCount,
+        skippedCount: upserted.skippedCount,
         status,
         runId,
       },

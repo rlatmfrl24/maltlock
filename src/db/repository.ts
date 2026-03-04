@@ -1,5 +1,10 @@
 import Dexie from 'dexie'
-import type { CrawledItem, CrawlRun, ParsedItem } from '../types/contracts'
+import type {
+  CrawledItem,
+  CrawledItemLog,
+  CrawlRun,
+  ParsedItem,
+} from '../types/contracts'
 import { hashString } from '../utils/hash'
 import { db } from './schema'
 
@@ -59,12 +64,23 @@ function dedupeByItemId(items: CrawledItem[]): CrawledItem[] {
 export interface UpsertCrawledItemsResult {
   items: CrawledItem[]
   insertedCount: number
-  updatedCount: number
+  skippedCount: number
 }
 
 export function createItemId(siteId: string, url: string, title: string): string {
   const normalized = `${normalizeUrl(url).toLowerCase()}|${title.trim().toLowerCase()}`
   return `${siteId}:${hashString(normalized)}`
+}
+
+function createItemLog(item: CrawledItem): CrawledItemLog {
+  return {
+    id: item.id,
+    siteId: item.siteId,
+    itemId: item.id,
+    firstSeenAt: item.crawledAt,
+    lastSeenAt: item.crawledAt,
+    seenCount: 1,
+  }
 }
 
 function normalizeParsedItem(
@@ -101,24 +117,77 @@ export async function upsertCrawledItems(
     .map((item) => normalizeParsedItem(siteId, item, crawledAt))
     .filter((item): item is CrawledItem => item !== null)
   const dedupedNormalized = dedupeByItemId(normalized)
+  const itemIds = dedupedNormalized.map((item) => item.id)
 
   if (dedupedNormalized.length === 0) {
     return {
       items: [],
       insertedCount: 0,
-      updatedCount: 0,
+      skippedCount: 0,
     }
   }
 
-  const existingItems = await db.items.bulkGet(dedupedNormalized.map((item) => item.id))
-  const updatedCount = existingItems.filter((item) => item !== undefined).length
-  const insertedCount = dedupedNormalized.length - updatedCount
+  const existingLogs = await db.crawledItemLogs.bulkGet(itemIds)
+  const existingItems = await db.items.bulkGet(itemIds)
+  const existingLogById = new Map<string, CrawledItemLog>()
+  for (const log of existingLogs) {
+    if (log) {
+      existingLogById.set(log.id, log)
+    }
+  }
+  const existingItemById = new Map<string, CrawledItem>()
+  for (const existingItem of existingItems) {
+    if (existingItem) {
+      existingItemById.set(existingItem.id, existingItem)
+    }
+  }
 
-  await db.items.bulkPut(dedupedNormalized)
+  const freshItems: CrawledItem[] = []
+  const logsToWrite: CrawledItemLog[] = []
+
+  for (const item of dedupedNormalized) {
+    const existingLog = existingLogById.get(item.id)
+
+    if (!existingLog) {
+      const existingItem = existingItemById.get(item.id)
+      if (existingItem) {
+        logsToWrite.push({
+          id: existingItem.id,
+          siteId: existingItem.siteId,
+          itemId: existingItem.id,
+          firstSeenAt: existingItem.crawledAt,
+          lastSeenAt: crawledAt,
+          seenCount: 2,
+        })
+        continue
+      }
+
+      freshItems.push(item)
+      logsToWrite.push(createItemLog(item))
+      continue
+    }
+
+    logsToWrite.push({
+      ...existingLog,
+      lastSeenAt: crawledAt,
+      seenCount: existingLog.seenCount + 1,
+    })
+  }
+
+  await db.transaction('rw', db.items, db.crawledItemLogs, async () => {
+    if (freshItems.length > 0) {
+      await db.items.bulkPut(freshItems)
+    }
+    await db.crawledItemLogs.bulkPut(logsToWrite)
+  })
+
+  const insertedCount = freshItems.length
+  const skippedCount = dedupedNormalized.length - insertedCount
+
   return {
-    items: dedupedNormalized,
+    items: freshItems,
     insertedCount,
-    updatedCount,
+    skippedCount,
   }
 }
 
@@ -155,8 +224,9 @@ export async function listCrawlRunsBySite(
 }
 
 export async function clearAllData(): Promise<void> {
-  await db.transaction('rw', db.items, db.crawlRuns, async () => {
+  await db.transaction('rw', db.items, db.crawlRuns, db.crawledItemLogs, async () => {
     await db.items.clear()
     await db.crawlRuns.clear()
+    await db.crawledItemLogs.clear()
   })
 }

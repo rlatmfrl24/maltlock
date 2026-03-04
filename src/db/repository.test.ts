@@ -25,7 +25,7 @@ describe('repository', () => {
     expect(first).toBe(second)
   })
 
-  it('upserts duplicate items instead of creating multiple records', async () => {
+  it('skips already logged items instead of updating existing records', async () => {
     await upsertCrawledItems(
       'hacker-news',
       [
@@ -39,7 +39,7 @@ describe('repository', () => {
       100,
     )
 
-    await upsertCrawledItems(
+    const result = await upsertCrawledItems(
       'hacker-news',
       [
         {
@@ -53,13 +53,21 @@ describe('repository', () => {
     )
 
     const items = await listItemsBySite('hacker-news')
+    const log = await db.crawledItemLogs.get(items[0]?.id ?? '')
 
     expect(items).toHaveLength(1)
+    expect(result.insertedCount).toBe(0)
+    expect(result.skippedCount).toBe(1)
     expect(items[0]).toMatchObject({
       title: 'Item 1',
-      summary: 'second',
-      previewImageUrl: 'https://images.example.com/second.jpg',
-      crawledAt: 200,
+      summary: 'first',
+      previewImageUrl: 'https://images.example.com/first.jpg',
+      crawledAt: 100,
+    })
+    expect(log).toMatchObject({
+      firstSeenAt: 100,
+      lastSeenAt: 200,
+      seenCount: 2,
     })
   })
 
@@ -85,12 +93,12 @@ describe('repository', () => {
 
     expect(result.items).toHaveLength(1)
     expect(result.insertedCount).toBe(1)
-    expect(result.updatedCount).toBe(0)
+    expect(result.skippedCount).toBe(0)
     expect(items).toHaveLength(1)
     expect(items[0]?.summary).toBe('second')
   })
 
-  it('counts inserted and updated items separately when records already exist', async () => {
+  it('counts inserted and skipped items separately when records already exist', async () => {
     await upsertCrawledItems(
       'hacker-news',
       [{ title: 'Existing', url: 'https://example.com/existing' }],
@@ -106,9 +114,39 @@ describe('repository', () => {
       200,
     )
 
-    expect(result.items).toHaveLength(2)
+    expect(result.items).toHaveLength(1)
     expect(result.insertedCount).toBe(1)
-    expect(result.updatedCount).toBe(1)
+    expect(result.skippedCount).toBe(1)
+  })
+
+  it('treats pre-existing items as already seen even when log is missing', async () => {
+    await db.items.put({
+      id: createItemId('hacker-news', 'https://example.com/existing', 'Existing'),
+      siteId: 'hacker-news',
+      title: 'Existing',
+      url: 'https://example.com/existing',
+      crawledAt: 50,
+    })
+
+    const result = await upsertCrawledItems(
+      'hacker-news',
+      [{ title: 'Existing', url: 'https://example.com/existing' }],
+      100,
+    )
+    const existingId = createItemId(
+      'hacker-news',
+      'https://example.com/existing',
+      'Existing',
+    )
+    const log = await db.crawledItemLogs.get(existingId)
+
+    expect(result.insertedCount).toBe(0)
+    expect(result.skippedCount).toBe(1)
+    expect(log).toMatchObject({
+      firstSeenAt: 50,
+      lastSeenAt: 100,
+      seenCount: 2,
+    })
   })
 
   it('separates site data by tab site id', async () => {
@@ -149,5 +187,31 @@ describe('repository', () => {
 
     expect(afterDelete).toHaveLength(1)
     expect(afterDelete[0]?.title).toBe('Keep Me')
+  })
+
+  it('does not re-insert deleted items when crawl log already exists', async () => {
+    await upsertCrawledItems(
+      'hacker-news',
+      [{ title: 'Seen Item', url: 'https://example.com/seen' }],
+      100,
+    )
+
+    const [storedItem] = await listItemsBySite('hacker-news')
+    if (!storedItem) {
+      throw new Error('Stored item not found')
+    }
+
+    await deleteCrawledItem(storedItem.id)
+
+    const recrawlResult = await upsertCrawledItems(
+      'hacker-news',
+      [{ title: 'Seen Item', url: 'https://example.com/seen' }],
+      200,
+    )
+    const itemsAfterRecrawl = await listItemsBySite('hacker-news')
+
+    expect(recrawlResult.insertedCount).toBe(0)
+    expect(recrawlResult.skippedCount).toBe(1)
+    expect(itemsAfterRecrawl).toHaveLength(0)
   })
 })

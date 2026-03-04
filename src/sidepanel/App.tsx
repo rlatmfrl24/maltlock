@@ -24,7 +24,7 @@ interface StatusState {
 
 const DEFAULT_STATUS: StatusState = {
   kind: 'idle',
-  message: '대상 사이트를 열고 활성 탭에서 크롤 버튼을 눌러주세요.',
+  message: '대상 사이트로 현재 탭을 이동한 뒤 크롤 버튼을 눌러주세요.',
 }
 
 const PRIVACY_MODE_STORAGE_KEY = 'maltlock:privacy-mode'
@@ -220,7 +220,7 @@ function App() {
 
     setStatus({
       kind: 'success',
-      message: `${siteName} 탭을 열었습니다.`,
+      message: `${siteName} 사이트로 현재 탭을 이동했습니다.`,
     })
   }
 
@@ -255,8 +255,8 @@ function App() {
       setStatus({
         kind: 'warning',
         message:
-          response.data.updatedCount > 0
-            ? `${response.data.parsedCount}건 파싱, 신규 저장 0건 / 기존 ${response.data.updatedCount}건 업데이트했습니다.`
+          response.data.skippedCount > 0
+            ? `${response.data.parsedCount}건 파싱, 신규 저장 0건 / 기존 로그 ${response.data.skippedCount}건 중복 제외했습니다.`
             : `${response.data.parsedCount}건 파싱, 신규 저장 0건입니다. 필터 조건을 확인하세요.`,
       })
       return
@@ -265,8 +265,8 @@ function App() {
     setStatus({
       kind: 'success',
       message:
-        response.data.updatedCount > 0
-          ? `${response.data.parsedCount}건 파싱, 신규 ${response.data.storedCount}건 저장 / 기존 ${response.data.updatedCount}건 업데이트했습니다.`
+        response.data.skippedCount > 0
+          ? `${response.data.parsedCount}건 파싱, 신규 ${response.data.storedCount}건 저장 / 기존 로그 ${response.data.skippedCount}건 중복 제외했습니다.`
           : `${response.data.parsedCount}건 파싱, 신규 ${response.data.storedCount}건 저장했습니다.`,
     })
   }
@@ -453,7 +453,7 @@ function App() {
           <h1>Maltlock Crawler</h1>
           <span className="header-badge">Side Panel</span>
         </div>
-        <p className="panel-subtitle">탭 열기 → 크롤 실행 → 저장 결과 검토</p>
+        <p className="panel-subtitle">현재 탭 이동 → 크롤 실행 → 저장 결과 검토</p>
         <div className="header-meta">
           <span className="meta-pill">선택: {activeSiteName}</span>
           <span className="meta-pill">저장: {items.length}건</span>
@@ -463,7 +463,7 @@ function App() {
       <section className="section-block">
         <div className="section-heading">
           <h2>1. 대상 사이트</h2>
-          <p>버튼을 누르면 해당 사이트 탭을 열고 현재 대상으로 설정합니다.</p>
+          <p>버튼을 누르면 현재 활성 탭을 해당 사이트로 이동하고 현재 대상으로 설정합니다.</p>
         </div>
         <div className="site-grid">
           {targetSites.map((site) => (

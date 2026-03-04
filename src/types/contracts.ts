@@ -37,6 +37,15 @@ export interface CrawledItem {
   crawledAt: number
 }
 
+export interface CrawledItemLog {
+  id: string
+  siteId: string
+  itemId: string
+  firstSeenAt: number
+  lastSeenAt: number
+  seenCount: number
+}
+
 export interface CrawlRun {
   runId: string
   siteId: string
@@ -117,7 +126,7 @@ export interface CrawlSummary {
   tabUrl: string
   parsedCount: number
   storedCount: number
-  updatedCount: number
+  skippedCount: number
   status: 'success' | 'partial'
   runId: string
 }

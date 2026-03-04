@@ -15,8 +15,8 @@
 1. Side Panel에서 사이트 선택
 2. `OPEN_TARGET_SITE` 메시지로 탭 오픈
 3. `CRAWL_ACTIVE_TAB` 메시지로 활성 탭 크롤 시작
-4. HTML 수집 -> 파서 실행 -> 중복 키 생성(`URL + titleHash`)
-5. Dexie 저장 및 사이트별 리스트 조회
+4. HTML 수집 -> 파서 실행 -> 아이템 ID 생성(`URL + titleHash`) + 기존 수집 로그 확인
+5. 신규 아이템만 Dexie 저장, 전체 아이템은 로그(`seenCount`) 갱신
 
 ## 오류 코드 정책
 - `TAB_NOT_FOUND`

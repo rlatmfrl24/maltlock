@@ -1,13 +1,13 @@
 # Maltlock Chrome Side Panel Crawler
 
 React + TypeScript + Vite 기반 Chrome MV3 사이드패널 확장입니다.  
-선택한 사이트 탭을 열고, 활성 탭 HTML을 수동 크롤링해 IndexedDB에 저장/조회합니다.
+선택한 사이트로 현재 활성 탭을 이동하고, 활성 탭 HTML을 수동 크롤링해 IndexedDB에 저장/조회합니다.
 
 ## 주요 기능
-- 사이트 버튼 클릭으로 대상 탭 오픈 (`OPEN_TARGET_SITE`)
+- 사이트 버튼 클릭으로 현재 탭을 대상 사이트로 이동 (`OPEN_TARGET_SITE`)
 - 활성 탭 HTML 수집 후 사이트별 파서 실행 (`CRAWL_ACTIVE_TAB`)
-- 파싱 결과를 로컬 IndexedDB(Dexie)에 upsert 저장
-- 동일 아이템 중복 저장 방지 (정규화 URL + title 기반 해시 ID)
+- 파싱 결과를 로컬 IndexedDB(Dexie)에 저장
+- 기존 수집 로그 기반 중복 저장 방지 (아이템 ID별 `seen` 로그 유지)
 - 사이트별 최근 실행 기록(`success`/`partial`/`failed`) 표시
 - 저장 아이템 단건 삭제
 - 사생활 모드
@@ -31,6 +31,10 @@ React + TypeScript + Vite 기반 Chrome MV3 사이드패널 확장입니다.
 ### `crawlRuns`
 - `runId`, `siteId`, `startedAt`, `finishedAt`, `status`, `itemCount`, `errorCode`
 - 인덱스: `runId`, `siteId`, `startedAt`, `finishedAt`, `status`, `[siteId+startedAt]`
+
+### `crawledItemLogs`
+- `id(itemId)`, `siteId`, `itemId`, `firstSeenAt`, `lastSeenAt`, `seenCount`
+- 인덱스: `id`, `siteId`, `itemId`, `firstSeenAt`, `lastSeenAt`, `seenCount`, `[siteId+lastSeenAt]`
 
 ## 기술 스택
 - React 19
