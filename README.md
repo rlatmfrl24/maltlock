@@ -19,6 +19,8 @@ React + TypeScript + Vite 기반 Chrome MV3 사이드패널 확장입니다.
 - KissJAV: `https://kissjav.com/most-popular/?sort_by=video_viewed_week`
 - MissAV: `https://missav123.to/ko/all?sort=weekly_views`
 - TwiDouga: `https://www.twidouga.net/ko/ranking_t1.php`
+- XRANKING: `https://xranking.site/ranking`
+- NimiWiki: `https://tw.nimi.wiki/`
 - TorrentBot: `https://torrentbot230.site/topic/index?top=20`
 - Kone: `https://kone.gg/s/pornvideo?mode=hot`
 - Tcafe: `https://tcafe21.com/bbs/board.php?bo_table=D2001`

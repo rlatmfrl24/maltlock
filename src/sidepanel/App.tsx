@@ -117,7 +117,9 @@ function mapError(code: CrawlErrorCode): string {
 
 function getTitleLinkUrl(item: CrawledItem): string {
   if (
-    item.siteId === 'twidouga-ranking-t1' &&
+    (item.siteId === 'twidouga-ranking-t1' ||
+      item.siteId === 'xranking-ranking' ||
+      item.siteId === 'nimi-tw-ranking') &&
     item.summary &&
     /^https?:\/\//i.test(item.summary)
   ) {

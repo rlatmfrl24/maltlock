@@ -18,6 +18,13 @@ import type {
 const PRIVACY_BLUR_STYLE_ID = 'maltlock-privacy-screen-blur-style'
 let privacyScreenBlurEnabled = false
 const privacyBlurredTabIds = new Set<number>()
+const NIMI_ACTIVE_TAB_BUTTON_REGEX =
+  /<button\b[^>]*class=["'][^"']*(?:tab-active|bg-violet-500\/20)[^"']*["'][^>]*>([\s\S]*?)<\/button>/gi
+const NIMI_ACTIVE_PERIOD_BUTTON_REGEX =
+  /<button\b[^>]*class=["'][^"']*shadow-violet-500\/50[^"']*["'][^>]*>([\s\S]*?)<\/button>/gi
+
+type NimiView = 'ranking' | 'realtime' | 'recent'
+type NimiPeriod = 'hourly' | 'daily' | 'weekly' | 'monthly'
 
 class CrawlFailure extends Error {
   code: CrawlErrorCode
@@ -73,6 +80,141 @@ function normalizeTargetUrl(input: string | undefined): string | undefined {
   } catch {
     return undefined
   }
+}
+
+function stripHtmlTags(input: string): string {
+  return input.replace(/<[^>]+>/g, ' ')
+}
+
+function normalizeWhitespace(input: string): string {
+  return input.replace(/\s+/g, ' ').trim()
+}
+
+function extractHtmlText(input: string): string {
+  return normalizeWhitespace(stripHtmlTags(input))
+}
+
+function getNimiActiveView(html: string): NimiView {
+  for (const match of html.matchAll(NIMI_ACTIVE_TAB_BUTTON_REGEX)) {
+    const label = extractHtmlText(match[1] ?? '')
+    if (!label) {
+      continue
+    }
+
+    if (label.includes('실시간')) {
+      return 'realtime'
+    }
+
+    if (label.includes('신규')) {
+      return 'recent'
+    }
+
+    if (label.includes('인기')) {
+      return 'ranking'
+    }
+  }
+
+  return 'ranking'
+}
+
+function getNimiActivePeriod(html: string): NimiPeriod {
+  for (const match of html.matchAll(NIMI_ACTIVE_PERIOD_BUTTON_REGEX)) {
+    const label = extractHtmlText(match[1] ?? '')
+    if (!label) {
+      continue
+    }
+
+    if (label.includes('1달')) {
+      return 'monthly'
+    }
+
+    if (label.includes('1주')) {
+      return 'weekly'
+    }
+
+    if (label.includes('1일')) {
+      return 'daily'
+    }
+
+    if (label.includes('1시간')) {
+      return 'hourly'
+    }
+  }
+
+  return 'hourly'
+}
+
+function buildNimiApiUrl(html: string, tabUrl: string): string | undefined {
+  let origin: string
+
+  try {
+    origin = new URL(tabUrl).origin
+  } catch {
+    return undefined
+  }
+
+  const activeView = getNimiActiveView(html)
+
+  if (activeView === 'ranking') {
+    const activePeriod = getNimiActivePeriod(html)
+    return `${origin}/api/ranking?platform=tw&period=${activePeriod}`
+  }
+
+  return `${origin}/api/${activeView}?platform=tw`
+}
+
+async function fetchNimiApiPayload(
+  collected: CollectHtmlResponse,
+): Promise<string | undefined> {
+  const apiUrl = buildNimiApiUrl(collected.html, collected.tabUrl)
+
+  if (!apiUrl) {
+    return undefined
+  }
+
+  const response = await fetch(apiUrl, {
+    headers: {
+      accept: 'application/json',
+    },
+  })
+
+  if (!response.ok) {
+    return undefined
+  }
+
+  const payload = (await response.text()).trim()
+
+  if (!payload.startsWith('{')) {
+    return undefined
+  }
+
+  return payload
+}
+
+async function resolveParserInput(
+  parserId: string,
+  collected: CollectHtmlResponse,
+): Promise<string> {
+  if (parserId !== 'nimi-tw-ranking') {
+    return collected.html
+  }
+
+  try {
+    const nimiApiPayload = await fetchNimiApiPayload(collected)
+
+    if (nimiApiPayload) {
+      return nimiApiPayload
+    }
+  } catch (error) {
+    if (import.meta.env.DEV) {
+      console.warn('[maltlock] failed to fetch nimi api payload', {
+        tabUrl: collected.tabUrl,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  return collected.html
 }
 
 async function ensureSidePanelBehavior(): Promise<void> {
@@ -227,16 +369,17 @@ async function crawlActiveTab(
     }
 
     const collected = await collectHtmlFromTab(activeTab.id)
+    const parserInput = await resolveParserInput(site.parserId, collected)
 
     let parsedItems
     try {
-      parsedItems = parseByParserId(site.parserId, collected.html, collected.tabUrl)
+      parsedItems = parseByParserId(site.parserId, parserInput, collected.tabUrl)
       if (import.meta.env.DEV) {
         console.info('[maltlock] parse result', {
           parserId: site.parserId,
           tabUrl: collected.tabUrl,
           parsedCount: parsedItems.length,
-          htmlLength: collected.html.length,
+          htmlLength: parserInput.length,
         })
       }
     } catch (error) {

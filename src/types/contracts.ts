@@ -19,6 +19,7 @@ export interface TargetSite {
 export interface ParsedItem {
   title: string
   url: string
+  dedupeKey?: string
   previewImageUrl?: string
   summary?: string
   price?: number

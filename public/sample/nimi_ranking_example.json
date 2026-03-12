@@ -1,0 +1,618 @@
+{
+  "success": true,
+  "period": "daily",
+  "total": 20,
+  "data": [
+    {
+      "id": "1959105747834544128",
+      "title": "虎式坦克님의 동영상",
+      "uploader_name": "虎式坦克",
+      "uploader_handle": "fancha1111",
+      "uploader_uid": "1639818417359421440",
+      "duration": 140,
+      "thumbnail_url": "https://pbs.twimg.com/amplify_video_thumb/1959105747834544128/img/3_Cl2_pnkSbRf3IP.jpg?name=orig",
+      "direct_url": "https://video.twimg.com/amplify_video/1959105747834544128/vid/avc1/720x1176/xhU3Zg83i-snKGbt.mp4?tag=14",
+      "posted_at": "2026-03-12T15:46:41.766137+09:00",
+      "posts": [
+        {
+          "id": "1959105847151534126",
+          "posted_at": "2026-03-10T23:22:14+09:00",
+          "post_type": "SINGLE_VIDEO",
+          "uploader": {
+            "uid": "1639818417359421440",
+            "handle": "fancha1111",
+            "display_name": "虎式坦克",
+            "is_partner": false
+          }
+        }
+      ],
+      "play_count": 7403,
+      "is_m3u8": false,
+      "created_at": "2026-03-10T23:22:14.363791+09:00",
+      "platform": "tw",
+      "is_partner": false,
+      "ranking": 1
+    },
+    {
+      "id": "2030961564099223552",
+      "title": "민주님의 동영상",
+      "uploader_name": "민주",
+      "uploader_handle": "minji545260",
+      "uploader_uid": "1989177499323101187",
+      "duration": 51,
+      "thumbnail_url": "https://pbs.twimg.com/amplify_video_thumb/2030961564099223552/img/UI1k68WlNFUzXjRC.jpg?name=orig",
+      "direct_url": "https://video.twimg.com/amplify_video/2030961564099223552/vid/avc1/540x960/JlB-CmvOBE6lDN7q.mp4?tag=21",
+      "posted_at": "2026-03-12T15:46:52.393628+09:00",
+      "posts": [
+        {
+          "id": "2030961636232839284",
+          "posted_at": "2026-03-10T19:40:27+09:00",
+          "post_type": "PLAYLIST",
+          "uploader": {
+            "uid": "1989177499323101187",
+            "handle": "minji545260",
+            "display_name": "민주",
+            "is_partner": false
+          }
+        }
+      ],
+      "play_count": 6307,
+      "is_m3u8": false,
+      "created_at": "2026-03-10T19:40:26.86593+09:00",
+      "platform": "tw",
+      "is_partner": false,
+      "ranking": 2
+    },
+    {
+      "id": "2031572883751972864",
+      "title": "𝐖𝐚𝐢𝐟𝐮🖤🥀님의 동영상",
+      "uploader_name": "𝐖𝐚𝐢𝐟𝐮🖤🥀",
+      "uploader_handle": "Gothxwaifu",
+      "uploader_uid": "2017533645091966980",
+      "duration": 48,
+      "thumbnail_url": "https://pbs.twimg.com/ext_tw_video_thumb/2031572883751972864/pu/img/vzgH3hB_sIAc_T2_.jpg?name=orig",
+      "direct_url": "https://video.twimg.com/ext_tw_video/2031572883751972864/pu/vid/avc1/720x1068/Jj7z-rED0a98Qr_9.mp4?tag=12",
+      "posted_at": "2026-03-12T15:46:52.534267+09:00",
+      "posts": [
+        {
+          "id": "2031572954660876754",
+          "posted_at": "2026-03-11T13:48:05+09:00",
+          "post_type": "SINGLE_VIDEO",
+          "uploader": {
+            "uid": "2017533645091966980",
+            "handle": "Gothxwaifu",
+            "display_name": "𝐖𝐚𝐢𝐟𝐮🖤🥀",
+            "is_partner": false
+          }
+        },
+        {
+          "id": "2031601985267577335",
+          "posted_at": "2026-03-12T00:12:55+09:00",
+          "post_type": "SINGLE_VIDEO",
+          "uploader": {
+            "uid": "1380200317455716353",
+            "handle": "djqmxhela",
+            "display_name": "지기",
+            "is_partner": false
+          }
+        }
+      ],
+      "play_count": 5427,
+      "is_m3u8": false,
+      "created_at": "2026-03-11T13:48:05.126175+09:00",
+      "platform": "tw",
+      "is_partner": false,
+      "ranking": 3
+    },
+    {
+      "id": "2031597073586597889",
+      "title": "Taina Osborn님의 동영상",
+      "uploader_name": "Taina Osborn",
+      "uploader_handle": "OsbornTain44195",
+      "uploader_uid": "1953740721049264128",
+      "duration": 54,
+      "thumbnail_url": "https://pbs.twimg.com/amplify_video_thumb/2031597073586597889/img/ol771CkhT_lhpB1d.jpg?name=orig",
+      "direct_url": "https://video.twimg.com/amplify_video/2031597073586597889/vid/avc1/720x720/X3og5SO00_ky8d4p.mp4?tag=14",
+      "posted_at": "2026-03-12T15:46:56.706773+09:00",
+      "posts": [
+        {
+          "id": "2031597249218884054",
+          "posted_at": "2026-03-12T00:56:08+09:00",
+          "post_type": "SINGLE_VIDEO",
+          "uploader": {
+            "uid": "1953740721049264128",
+            "handle": "OsbornTain44195",
+            "display_name": "Taina Osborn",
+            "is_partner": false
+          }
+        }
+      ],
+      "play_count": 4522,
+      "is_m3u8": false,
+      "created_at": "2026-03-12T00:56:07.438664+09:00",
+      "platform": "tw",
+      "is_partner": false,
+      "ranking": 4
+    },
+    {
+      "id": "2028136862917996545",
+      "title": "형부사랑 미경님의 동영상",
+      "uploader_name": "형부사랑 미경",
+      "uploader_handle": "gimyeon84499676",
+      "uploader_uid": "1657699298904264705",
+      "duration": 64,
+      "thumbnail_url": "https://pbs.twimg.com/ext_tw_video_thumb/2028136862917996545/pu/img/lcS8rovkSEe-uLYV.jpg?name=orig",
+      "direct_url": "https://video.twimg.com/ext_tw_video/2028136862917996545/pu/vid/avc1/720x1280/XWRakPgXmOBtA8UV.mp4?tag=12",
+      "posted_at": "2026-03-12T15:46:00.28995+09:00",
+      "posts": [
+        {
+          "id": "2028136924876353724",
+          "posted_at": "2026-03-11T16:03:56+09:00",
+          "post_type": "SINGLE_VIDEO",
+          "uploader": {
+            "uid": "1657699298904264705",
+            "handle": "gimyeon84499676",
+            "display_name": "형부사랑 미경",
+            "is_partner": false
+          }
+        }
+      ],
+      "play_count": 4265,
+      "is_m3u8": false,
+      "created_at": "2026-03-11T16:03:56.041624+09:00",
+      "platform": "tw",
+      "is_partner": false,
+      "ranking": 5
+    },
+    {
+      "id": "1547535633475743744",
+      "title": "구글 야동계님의 동영상",
+      "uploader_name": "구글 야동계",
+      "uploader_handle": "google_yadong",
+      "uploader_uid": "2021488576664412160",
+      "duration": 45,
+      "thumbnail_url": "https://pbs.twimg.com/ext_tw_video_thumb/1547535633475743744/pu/img/7YSpz7bTVJlqW12U.jpg?name=orig",
+      "direct_url": "https://video.twimg.com/ext_tw_video/1547535633475743744/pu/vid/720x1280/QZIZaDzSswfDYORw.mp4?tag=12",
+      "posted_at": "2026-03-12T15:46:42.709285+09:00",
+      "posts": [
+        {
+          "id": "2025238644794302927",
+          "posted_at": "2026-02-22T01:41:16+09:00",
+          "post_type": "SINGLE_VIDEO",
+          "uploader": {
+            "uid": "2021488576664412160",
+            "handle": "google_yadong",
+            "display_name": "구글 야동계",
+            "is_partner": false
+          }
+        }
+      ],
+      "play_count": 4177,
+      "is_m3u8": false,
+      "created_at": "2026-02-22T01:41:15.992679+09:00",
+      "platform": "tw",
+      "is_partner": false,
+      "ranking": 6
+    },
+    {
+      "id": "2030305079811817472",
+      "title": "같이 뇌 녹을사람 구함님의 동영상",
+      "uploader_name": "같이 뇌 녹을사람 구함",
+      "uploader_handle": "iiiubiniii01",
+      "uploader_uid": "1955571617893085184",
+      "duration": 750,
+      "thumbnail_url": "https://pbs.twimg.com/amplify_video_thumb/2030305079811817472/img/k98bmon-1YXctF9M.jpg?name=orig",
+      "direct_url": "https://video.twimg.com/amplify_video/2030305079811817472/vid/avc1/1080x1080/MooY1bsjyqzB5RAI.mp4?tag=21",
+      "posted_at": "2026-03-12T15:43:30.891667+09:00",
+      "posts": [
+        {
+          "id": "2031551805419839584",
+          "posted_at": "2026-03-11T13:34:05+09:00",
+          "post_type": "SINGLE_VIDEO",
+          "uploader": {
+            "uid": "1955571617893085184",
+            "handle": "iiiubiniii01",
+            "display_name": "같이 뇌 녹을사람 구함",
+            "is_partner": false
+          }
+        }
+      ],
+      "play_count": 4021,
+      "is_m3u8": false,
+      "created_at": "2026-03-11T13:34:05.422941+09:00",
+      "platform": "tw",
+      "is_partner": false,
+      "ranking": 7
+    },
+    {
+      "id": "1747129689444171776",
+      "title": "딸감저장고님의 동영상",
+      "uploader_name": "딸감저장고",
+      "uploader_handle": "miniminipeka",
+      "uploader_uid": "1454110464623792130",
+      "duration": 139,
+      "thumbnail_url": "https://pbs.twimg.com/ext_tw_video_thumb/1747129689444171776/pu/img/GDHDrS-Y0WARPV4k.jpg?name=orig",
+      "direct_url": "https://video.twimg.com/ext_tw_video/1747129689444171776/pu/vid/avc1/1150x720/yIpFbDP6M_wovjW8.mp4?tag=12",
+      "posted_at": "2026-03-12T15:47:00.14928+09:00",
+      "posts": [
+        {
+          "id": "2031229813688811708",
+          "posted_at": "2026-03-11T21:05:05+09:00",
+          "post_type": "SINGLE_VIDEO",
+          "uploader": {
+            "uid": "1454110464623792130",
+            "handle": "miniminipeka",
+            "display_name": "딸감저장고",
+            "is_partner": false
+          }
+        }
+      ],
+      "play_count": 3795,
+      "is_m3u8": false,
+      "created_at": "2026-03-11T21:05:04.155503+09:00",
+      "platform": "tw",
+      "is_partner": false,
+      "ranking": 8
+    },
+    {
+      "id": "1990454221796429824",
+      "title": "虎式坦克님의 동영상",
+      "uploader_name": "虎式坦克",
+      "uploader_handle": "fancha1111",
+      "uploader_uid": "1639818417359421440",
+      "duration": 137,
+      "thumbnail_url": "https://pbs.twimg.com/amplify_video_thumb/1990454221796429824/img/Wf9yxmkPvYo7kaqz.jpg?name=orig",
+      "direct_url": "https://video.twimg.com/amplify_video/1990454221796429824/vid/avc1/720x1280/7I3C83bauOoVZxBg.mp4?tag=14",
+      "posted_at": "2026-03-12T15:45:46.431006+09:00",
+      "posts": [
+        {
+          "id": "1990458252346474528",
+          "posted_at": "2026-03-11T13:47:15+09:00",
+          "post_type": "SINGLE_VIDEO",
+          "uploader": {
+            "uid": "1639818417359421440",
+            "handle": "fancha1111",
+            "display_name": "虎式坦克",
+            "is_partner": false
+          }
+        }
+      ],
+      "play_count": 3431,
+      "is_m3u8": false,
+      "created_at": "2026-03-11T13:47:14.863708+09:00",
+      "platform": "tw",
+      "is_partner": false,
+      "ranking": 9
+    },
+    {
+      "id": "2031568674478501891",
+      "title": "사모쨩님의 동영상",
+      "uploader_name": "사모쨩",
+      "uploader_handle": "dididi78900",
+      "uploader_uid": "2013831378580946944",
+      "duration": 91,
+      "thumbnail_url": "https://pbs.twimg.com/amplify_video_thumb/2031568674478501891/img/JVeYweUtsUJKfnQd.jpg?name=orig",
+      "direct_url": "https://video.twimg.com/amplify_video/2031568674478501891/vid/avc1/720x1260/EVLiN-eAqrhhBU9c.mp4?tag=21",
+      "posted_at": "2026-03-12T15:45:11.773322+09:00",
+      "posts": [
+        {
+          "id": "2031568818578010497",
+          "posted_at": "2026-03-11T14:28:35+09:00",
+          "post_type": "SINGLE_VIDEO",
+          "uploader": {
+            "uid": "2013831378580946944",
+            "handle": "dididi78900",
+            "display_name": "사모쨩",
+            "is_partner": false
+          }
+        }
+      ],
+      "play_count": 3151,
+      "is_m3u8": false,
+      "created_at": "2026-03-11T14:28:34.924515+09:00",
+      "platform": "tw",
+      "is_partner": false,
+      "ranking": 10
+    },
+    {
+      "id": "2031549741377761280",
+      "title": "나현님의 동영상",
+      "uploader_name": "나현",
+      "uploader_handle": "nah011398",
+      "uploader_uid": "1993706008842248192",
+      "duration": 13,
+      "thumbnail_url": "https://pbs.twimg.com/ext_tw_video_thumb/2031549741377761280/pu/img/jLVoYkUQ80RYFAnm.jpg?name=orig",
+      "direct_url": "https://video.twimg.com/ext_tw_video/2031549741377761280/pu/vid/avc1/1280x720/9l2GYel4x8nQgIE7.mp4?tag=12",
+      "posted_at": "2026-03-12T15:45:29.349427+09:00",
+      "posts": [
+        {
+          "id": "2031549772390347258",
+          "posted_at": "2026-03-11T21:08:41+09:00",
+          "post_type": "SINGLE_VIDEO",
+          "uploader": {
+            "uid": "1993706008842248192",
+            "handle": "nah011398",
+            "display_name": "나현",
+            "is_partner": false
+          }
+        }
+      ],
+      "play_count": 3054,
+      "is_m3u8": false,
+      "created_at": "2026-03-11T21:08:41.226093+09:00",
+      "platform": "tw",
+      "is_partner": false,
+      "ranking": 11
+    },
+    {
+      "id": "2026168854851080193",
+      "title": "🇯🇵媚日おじさん🇯🇵jntr님의 동영상",
+      "uploader_name": "🇯🇵媚日おじさん🇯🇵jntr",
+      "uploader_handle": "Jntr_005",
+      "uploader_uid": "1980103195516178432",
+      "duration": 31,
+      "thumbnail_url": "https://pbs.twimg.com/ext_tw_video_thumb/2026168854851080193/pu/img/GpBrRyYl9itVW9BV.jpg?name=orig",
+      "direct_url": "https://video.twimg.com/ext_tw_video/2026168854851080193/pu/vid/avc1/720x1280/NHrfDLW-zAb-EpUx.mp4?tag=12",
+      "posted_at": "2026-03-12T15:46:48.021776+09:00",
+      "posts": [
+        {
+          "id": "2026168909997777076",
+          "posted_at": "2026-03-11T04:14:55+09:00",
+          "post_type": "PLAYLIST",
+          "uploader": {
+            "uid": "1980103195516178432",
+            "handle": "Jntr_005",
+            "display_name": "🇯🇵媚日おじさん🇯🇵jntr",
+            "is_partner": false
+          }
+        }
+      ],
+      "play_count": 2963,
+      "is_m3u8": false,
+      "created_at": "2026-03-11T04:14:54.696899+09:00",
+      "platform": "tw",
+      "is_partner": false,
+      "ranking": 12
+    },
+    {
+      "id": "2001112124102463488",
+      "title": "含亿口精님의 동영상",
+      "uploader_name": "含亿口精",
+      "uploader_handle": "raeltonsaz",
+      "uploader_uid": "1269492676522582016",
+      "duration": 54,
+      "thumbnail_url": "https://pbs.twimg.com/amplify_video_thumb/2001112124102463488/img/9-B-b5oEXh15YiyS.jpg?name=orig",
+      "direct_url": "https://video.twimg.com/amplify_video/2001112124102463488/vid/avc1/720x1280/1xXk7DlR-fUMKj9E.mp4?tag=14",
+      "posted_at": "2026-03-12T15:46:35.219965+09:00",
+      "posts": [
+        {
+          "id": "2001122297344876620",
+          "posted_at": "2025-12-23T00:00:17+09:00",
+          "post_type": "SINGLE_VIDEO",
+          "uploader": {
+            "uid": "1269492676522582016",
+            "handle": "raeltonsaz",
+            "display_name": "含亿口精",
+            "is_partner": false
+          }
+        }
+      ],
+      "play_count": 2861,
+      "is_m3u8": false,
+      "created_at": "2025-12-23T00:00:16.038984+09:00",
+      "platform": "tw",
+      "is_partner": false,
+      "ranking": 13
+    },
+    {
+      "id": "2031017470149152769",
+      "title": "로깅님의 동영상",
+      "uploader_name": "로깅",
+      "uploader_handle": "0417_hg",
+      "uploader_uid": "1509678612785811456",
+      "duration": 17,
+      "thumbnail_url": "https://pbs.twimg.com/amplify_video_thumb/2031017470149152769/img/Je9P3hJKST35tyX3.jpg?name=orig",
+      "direct_url": "https://video.twimg.com/amplify_video/2031017470149152769/vid/avc1/950x720/QTeAPvWILYR5ShxX.mp4?tag=21",
+      "posted_at": "2026-03-12T15:46:47.521729+09:00",
+      "posts": [
+        {
+          "id": "2031017530194858479",
+          "posted_at": "2026-03-12T01:24:43+09:00",
+          "post_type": "SINGLE_VIDEO",
+          "uploader": {
+            "uid": "1509678612785811456",
+            "handle": "0417_hg",
+            "display_name": "로깅",
+            "is_partner": false
+          }
+        }
+      ],
+      "play_count": 2816,
+      "is_m3u8": false,
+      "created_at": "2026-03-12T01:24:42.39826+09:00",
+      "platform": "tw",
+      "is_partner": false,
+      "ranking": 14
+    },
+    {
+      "id": "1888842451760349185",
+      "title": "Sex VietSub님의 동영상",
+      "uploader_name": "Sex VietSub",
+      "uploader_handle": "phimheovietsub",
+      "uploader_uid": "366934897",
+      "duration": 3627,
+      "thumbnail_url": "https://pbs.twimg.com/amplify_video_thumb/1888842451760349185/img/jMNGH9MdjNMuR6kI.jpg?name=orig",
+      "direct_url": "https://video.twimg.com/amplify_video/1888842451760349185/vid/avc1/1280x720/W-SvE4qMWq8UuXqp.mp4?tag=14",
+      "posted_at": "2026-03-12T15:46:56.590731+09:00",
+      "posts": [
+        {
+          "id": "1888868238580469786",
+          "posted_at": "2026-03-10T18:16:07+09:00",
+          "post_type": "SINGLE_VIDEO",
+          "uploader": {
+            "uid": "366934897",
+            "handle": "phimheovietsub",
+            "display_name": "Sex VietSub",
+            "is_partner": false
+          }
+        }
+      ],
+      "play_count": 2609,
+      "is_m3u8": false,
+      "created_at": "2026-03-10T18:16:07.374329+09:00",
+      "platform": "tw",
+      "is_partner": false,
+      "ranking": 15
+    },
+    {
+      "id": "2031449257018896385",
+      "title": "Negan 💸님의 동영상",
+      "uploader_name": "Negan 💸",
+      "uploader_handle": "Alain0012345",
+      "uploader_uid": "2007501663540756480",
+      "duration": 115,
+      "thumbnail_url": "https://pbs.twimg.com/ext_tw_video_thumb/2031449257018896385/pu/img/YMa1oEV7YD5rQ0jD.jpg?name=orig",
+      "direct_url": "https://video.twimg.com/ext_tw_video/2031449257018896385/pu/vid/avc1/576x1024/ybAQ-p-Dq7rR4TXm.mp4?tag=19",
+      "posted_at": "2026-03-12T15:46:23.084122+09:00",
+      "posts": [
+        {
+          "id": "2031449785207500942",
+          "posted_at": "2026-03-11T16:38:38+09:00",
+          "post_type": "SINGLE_VIDEO",
+          "uploader": {
+            "uid": "2007501663540756480",
+            "handle": "Alain0012345",
+            "display_name": "Negan 💸",
+            "is_partner": false
+          }
+        }
+      ],
+      "play_count": 2563,
+      "is_m3u8": false,
+      "created_at": "2026-03-11T16:38:38.323935+09:00",
+      "platform": "tw",
+      "is_partner": false,
+      "ranking": 16
+    },
+    {
+      "id": "2031412427297087488",
+      "title": "뿅뿅님의 동영상",
+      "uploader_name": "뿅뿅",
+      "uploader_handle": "BBBBbBbBbbung",
+      "uploader_uid": "1407724580186189828",
+      "duration": 8,
+      "thumbnail_url": "https://pbs.twimg.com/amplify_video_thumb/2031412427297087488/img/j9U0zqFEsPIBBanp.jpg?name=small",
+      "direct_url": "https://video.twimg.com/amplify_video/2031412427297087488/vid/avc1/640x480/7Oy1DuXD7XO6FrVH.mp4?tag=14",
+      "posted_at": "2026-03-12T15:46:05.929141+09:00",
+      "posts": [
+        {
+          "id": "2031412497287401738",
+          "posted_at": "2026-03-11T02:20:12+09:00",
+          "post_type": "SINGLE_VIDEO",
+          "uploader": {
+            "uid": "1407724580186189828",
+            "handle": "BBBBbBbBbbung",
+            "display_name": "뿅뿅",
+            "is_partner": false
+          }
+        }
+      ],
+      "play_count": 2489,
+      "is_m3u8": false,
+      "created_at": "2026-03-11T02:20:11.520032+09:00",
+      "platform": "tw",
+      "is_partner": false,
+      "ranking": 17
+    },
+    {
+      "id": "1494169958028578818",
+      "title": "갤러리백업님의 동영상",
+      "uploader_name": "갤러리백업",
+      "uploader_handle": "bildene_mine",
+      "uploader_uid": "1424373974394236928",
+      "duration": 6,
+      "thumbnail_url": "https://pbs.twimg.com/ext_tw_video_thumb/1494169958028578818/pu/img/lre0DjysdlOvo1qE.jpg?name=orig",
+      "direct_url": "https://video.twimg.com/ext_tw_video/1494169958028578818/pu/vid/958x720/MSc_DIXIeWkjJO_3.mp4?tag=12",
+      "posted_at": "2026-03-12T15:43:34.725733+09:00",
+      "posts": [
+        {
+          "id": "1494169979595681796",
+          "posted_at": "2026-03-10T22:11:31+09:00",
+          "post_type": "SINGLE_VIDEO",
+          "uploader": {
+            "uid": "1424373974394236928",
+            "handle": "bildene_mine",
+            "display_name": "갤러리백업",
+            "is_partner": false
+          }
+        }
+      ],
+      "play_count": 2461,
+      "is_m3u8": false,
+      "created_at": "2026-03-10T22:11:30.648084+09:00",
+      "platform": "tw",
+      "is_partner": false,
+      "ranking": 18
+    },
+    {
+      "id": "1911536560228462592",
+      "title": "Qy님의 동영상",
+      "uploader_name": "Qy",
+      "uploader_handle": "xdkengm",
+      "uploader_uid": "1460227889907974147",
+      "duration": 144,
+      "thumbnail_url": "https://pbs.twimg.com/amplify_video_thumb/1911536560228462592/img/gpPt23Mkilv66Ewy.jpg?name=orig",
+      "direct_url": "https://video.twimg.com/amplify_video/1911536560228462592/vid/avc1/1280x718/557t4qDAgW8ffCXl.mp4?tag=14",
+      "posted_at": "2026-03-12T15:46:13.233842+09:00",
+      "posts": [
+        {
+          "id": "1911536699383202277",
+          "posted_at": "2026-01-14T05:50:27+09:00",
+          "post_type": "SINGLE_VIDEO",
+          "uploader": {
+            "uid": "1460227889907974147",
+            "handle": "xdkengm",
+            "display_name": "Qy",
+            "is_partner": false
+          }
+        }
+      ],
+      "play_count": 2337,
+      "is_m3u8": false,
+      "created_at": "2026-01-14T05:50:27.083377+09:00",
+      "platform": "tw",
+      "is_partner": false,
+      "ranking": 19
+    },
+    {
+      "id": "2031188378717143041",
+      "title": "Maysara님의 동영상",
+      "uploader_name": "Maysara",
+      "uploader_handle": "MnshanN10762",
+      "uploader_uid": "2008269347974971392",
+      "duration": 127,
+      "thumbnail_url": "https://pbs.twimg.com/ext_tw_video_thumb/2031188378717143041/pu/img/ZZZfgKDjxrWrlYNK.jpg?name=orig",
+      "direct_url": "https://video.twimg.com/ext_tw_video/2031188378717143041/pu/vid/avc1/720x1252/P2Ki3bw-LuhbB2Ug.mp4?tag=12",
+      "posted_at": "2026-03-12T15:46:26.890889+09:00",
+      "posts": [
+        {
+          "id": "2031188934760300592",
+          "posted_at": "2026-03-11T23:55:27+09:00",
+          "post_type": "SINGLE_VIDEO",
+          "uploader": {
+            "uid": "2008269347974971392",
+            "handle": "MnshanN10762",
+            "display_name": "Maysara",
+            "is_partner": false
+          }
+        }
+      ],
+      "play_count": 2225,
+      "is_m3u8": false,
+      "created_at": "2026-03-11T23:55:27.04472+09:00",
+      "platform": "tw",
+      "is_partner": false,
+      "ranking": 20
+    }
+  ]
+}

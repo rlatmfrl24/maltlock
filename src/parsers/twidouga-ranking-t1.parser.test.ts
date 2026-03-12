@@ -16,20 +16,25 @@ describe('twidougaRankingT1Parser', () => {
       'https://www.twidouga.net/ko/ranking_t1.php',
     )
 
-    expect(items.length).toBeGreaterThanOrEqual(10)
+    expect(items.length).toBeGreaterThanOrEqual(9)
 
     const first = items[0]
     expect(first?.url.startsWith('https://video.twimg.com/')).toBe(true)
     expect(first?.previewImageUrl?.startsWith('https://pbs.twimg.com/')).toBe(true)
     expect(first?.title).toContain('1위')
     expect(first?.summary?.startsWith('https://x.com/')).toBe(true)
+    expect(first?.dedupeKey?.startsWith('twidouga:video-')).toBe(true)
 
     const missingPreview = items.some((item) => !item.previewImageUrl)
     const invalidVideoUrl = items.some(
       (item) => !item.url.startsWith('https://video.twimg.com/'),
     )
+    const duplicateVideoIdCount = items.filter((item) =>
+      item.url.includes('/2025196127910584320/'),
+    ).length
 
     expect(missingPreview).toBe(false)
     expect(invalidVideoUrl).toBe(false)
+    expect(duplicateVideoIdCount).toBe(1)
   })
 })

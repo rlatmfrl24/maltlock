@@ -67,8 +67,25 @@ export interface UpsertCrawledItemsResult {
   skippedCount: number
 }
 
-export function createItemId(siteId: string, url: string, title: string): string {
-  const normalized = `${normalizeUrl(url).toLowerCase()}|${title.trim().toLowerCase()}`
+function normalizeDedupeKey(input: string | undefined): string | undefined {
+  if (!input) {
+    return undefined
+  }
+
+  const normalized = input.trim().toLowerCase()
+  return normalized || undefined
+}
+
+export function createItemId(
+  siteId: string,
+  url: string,
+  title: string,
+  dedupeKey?: string,
+): string {
+  const normalizedDedupeKey = normalizeDedupeKey(dedupeKey)
+  const normalized = normalizedDedupeKey
+    ? `dedupe:${normalizedDedupeKey}`
+    : `${normalizeUrl(url).toLowerCase()}|${title.trim().toLowerCase()}`
   return `${siteId}:${hashString(normalized)}`
 }
 
@@ -96,7 +113,7 @@ function normalizeParsedItem(
   }
 
   return {
-    id: createItemId(siteId, url, title),
+    id: createItemId(siteId, url, title, item.dedupeKey),
     siteId,
     title,
     url,

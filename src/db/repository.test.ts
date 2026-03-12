@@ -25,6 +25,23 @@ describe('repository', () => {
     expect(first).toBe(second)
   })
 
+  it('prefers dedupe key over title/url when present', () => {
+    const first = createItemId(
+      'twidouga-ranking-t1',
+      'https://video.twimg.com/amplify_video/100/vid/a.mp4?tag=1',
+      '1위 - https://x.com/a/status/100',
+      ' twidouga:video-id:100 ',
+    )
+    const second = createItemId(
+      'twidouga-ranking-t1',
+      'https://video.twimg.com/ext_tw_video/100/pu/vid/b.mp4?tag=12',
+      '5위 - https://x.com/i/status/100',
+      'TWIDOUGA:VIDEO-ID:100',
+    )
+
+    expect(first).toBe(second)
+  })
+
   it('skips already logged items instead of updating existing records', async () => {
     await upsertCrawledItems(
       'hacker-news',
