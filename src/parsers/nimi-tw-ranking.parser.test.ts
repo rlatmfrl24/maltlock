@@ -47,6 +47,47 @@ describe('nimiTwRankingParser', () => {
     expect(hasMalformedTitle).toBe(false)
   })
 
+  it('extracts ranking items from the current bare-array nimi api payload', () => {
+    const payload = JSON.stringify([
+      {
+        video_id: '2040767762675736576',
+        thumbnail_url:
+          'https://pbs.twimg.com/ext_tw_video_thumb/2040767762675736576/pu/img/RffKoXzOQWfR9U-R.jpg?name=small',
+        direct_url:
+          'https://video.twimg.com/ext_tw_video/2040767762675736576/pu/vid/avc1/656x512/6EQLHr05HYGvQUEO.mp4?tag=12',
+        duration: 19,
+        posts: [
+          {
+            id: '2040767780975448378',
+            posted_at: '2026-04-06T01:47:18+09:00',
+            uploader: {
+              uid: '1857444376638832640',
+              handle: 'baji46392',
+              display_name: '오메숍',
+              is_partner: false,
+            },
+          },
+        ],
+        created_at: '2026-04-06T01:47:18.421259+09:00',
+        play_count: 527,
+      },
+    ])
+
+    const items = nimiTwRankingParser(payload, 'https://tw.nimi.wiki/')
+
+    expect(items).toHaveLength(1)
+    expect(items[0]?.title).toBe('1위 - 오메숍님의 동영상')
+    expect(items[0]?.url).toBe(
+      'https://video.twimg.com/ext_tw_video/2040767762675736576/pu/vid/avc1/656x512/6EQLHr05HYGvQUEO.mp4?tag=12',
+    )
+    expect(items[0]?.previewImageUrl).toBe(
+      'https://pbs.twimg.com/ext_tw_video_thumb/2040767762675736576/pu/img/RffKoXzOQWfR9U-R.jpg?name=small',
+    )
+    expect(items[0]?.summary).toBe('https://x.com/i/status/2040767780975448378')
+    expect(items[0]?.dedupeKey).toBe('nimi:video-id:2040767762675736576')
+    expect(items[0]?.rawHtmlSnippet).toBe('조회수 527')
+  })
+
   it('falls back to parsing hydrated html cards when api json is unavailable', () => {
     const html = loadHtmlFixture()
 

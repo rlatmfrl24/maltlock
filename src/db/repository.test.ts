@@ -3,6 +3,7 @@ import {
   clearAllData,
   createItemId,
   deleteCrawledItem,
+  listItemCountsBySite,
   listItemsBySite,
   upsertCrawledItems,
 } from './repository'
@@ -182,6 +183,29 @@ describe('repository', () => {
     expect(devItems).toHaveLength(1)
     expect(hnItems[0]?.title).toBe('HN Item')
     expect(devItems[0]?.title).toBe('DEV Item')
+  })
+
+  it('returns item counts for each requested site', async () => {
+    await upsertCrawledItems('hacker-news', [
+      { title: 'HN Item 1', url: 'https://news.ycombinator.com/item?id=1' },
+      { title: 'HN Item 2', url: 'https://news.ycombinator.com/item?id=2' },
+    ])
+
+    await upsertCrawledItems('devto-latest', [
+      { title: 'DEV Item', url: 'https://dev.to/dev/item' },
+    ])
+
+    const counts = await listItemCountsBySite([
+      'hacker-news',
+      'devto-latest',
+      'missing-site',
+    ])
+
+    expect(counts).toEqual({
+      'hacker-news': 2,
+      'devto-latest': 1,
+      'missing-site': 0,
+    })
   })
 
   it('deletes a single item from the list', async () => {

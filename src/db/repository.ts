@@ -220,6 +220,19 @@ export async function listItemsBySite(
     .toArray()
 }
 
+export async function listItemCountsBySite(
+  siteIds: readonly string[],
+): Promise<Record<string, number>> {
+  const counts = await Promise.all(
+    siteIds.map(async (siteId) => {
+      const count = await db.items.where('siteId').equals(siteId).count()
+      return [siteId, count] as const
+    }),
+  )
+
+  return Object.fromEntries(counts)
+}
+
 export async function deleteCrawledItem(itemId: string): Promise<void> {
   await db.items.delete(itemId)
 }

@@ -1,5 +1,6 @@
 import { getTargetSiteById, siteMatchesUrl } from '../config/targets'
 import { saveCrawlRun, upsertCrawledItems } from '../db/repository'
+import { buildNimiApiUrl } from './nimi'
 import { parseByParserId } from '../parsers'
 import type {
   CollectHtmlRequest,
@@ -8,6 +9,8 @@ import type {
   CrawlErrorCode,
   CrawlRun,
   CrawlSummary,
+  OpenItemLinkMessage,
+  OpenItemLinkResult,
   OpenTargetSiteMessage,
   SetPrivacyScreenBlurMessage,
   SetPrivacyScreenBlurResult,
@@ -18,13 +21,6 @@ import type {
 const PRIVACY_BLUR_STYLE_ID = 'maltlock-privacy-screen-blur-style'
 let privacyScreenBlurEnabled = false
 const privacyBlurredTabIds = new Set<number>()
-const NIMI_ACTIVE_TAB_BUTTON_REGEX =
-  /<button\b[^>]*class=["'][^"']*(?:tab-active|bg-violet-500\/20)[^"']*["'][^>]*>([\s\S]*?)<\/button>/gi
-const NIMI_ACTIVE_PERIOD_BUTTON_REGEX =
-  /<button\b[^>]*class=["'][^"']*shadow-violet-500\/50[^"']*["'][^>]*>([\s\S]*?)<\/button>/gi
-
-type NimiView = 'ranking' | 'realtime' | 'recent'
-type NimiPeriod = 'hourly' | 'daily' | 'weekly' | 'monthly'
 
 class CrawlFailure extends Error {
   code: CrawlErrorCode
@@ -82,87 +78,6 @@ function normalizeTargetUrl(input: string | undefined): string | undefined {
   }
 }
 
-function stripHtmlTags(input: string): string {
-  return input.replace(/<[^>]+>/g, ' ')
-}
-
-function normalizeWhitespace(input: string): string {
-  return input.replace(/\s+/g, ' ').trim()
-}
-
-function extractHtmlText(input: string): string {
-  return normalizeWhitespace(stripHtmlTags(input))
-}
-
-function getNimiActiveView(html: string): NimiView {
-  for (const match of html.matchAll(NIMI_ACTIVE_TAB_BUTTON_REGEX)) {
-    const label = extractHtmlText(match[1] ?? '')
-    if (!label) {
-      continue
-    }
-
-    if (label.includes('실시간')) {
-      return 'realtime'
-    }
-
-    if (label.includes('신규')) {
-      return 'recent'
-    }
-
-    if (label.includes('인기')) {
-      return 'ranking'
-    }
-  }
-
-  return 'ranking'
-}
-
-function getNimiActivePeriod(html: string): NimiPeriod {
-  for (const match of html.matchAll(NIMI_ACTIVE_PERIOD_BUTTON_REGEX)) {
-    const label = extractHtmlText(match[1] ?? '')
-    if (!label) {
-      continue
-    }
-
-    if (label.includes('1달')) {
-      return 'monthly'
-    }
-
-    if (label.includes('1주')) {
-      return 'weekly'
-    }
-
-    if (label.includes('1일')) {
-      return 'daily'
-    }
-
-    if (label.includes('1시간')) {
-      return 'hourly'
-    }
-  }
-
-  return 'hourly'
-}
-
-function buildNimiApiUrl(html: string, tabUrl: string): string | undefined {
-  let origin: string
-
-  try {
-    origin = new URL(tabUrl).origin
-  } catch {
-    return undefined
-  }
-
-  const activeView = getNimiActiveView(html)
-
-  if (activeView === 'ranking') {
-    const activePeriod = getNimiActivePeriod(html)
-    return `${origin}/api/ranking?platform=tw&period=${activePeriod}`
-  }
-
-  return `${origin}/api/${activeView}?platform=tw`
-}
-
 async function fetchNimiApiPayload(
   collected: CollectHtmlResponse,
 ): Promise<string | undefined> {
@@ -184,7 +99,7 @@ async function fetchNimiApiPayload(
 
   const payload = (await response.text()).trim()
 
-  if (!payload.startsWith('{')) {
+  if (!payload.startsWith('{') && !payload.startsWith('[')) {
     return undefined
   }
 
@@ -266,6 +181,66 @@ async function openTargetSite(
         siteId: site.id,
         tabId: updatedTabId,
         url: nextUrl,
+      },
+    }
+  } catch (error) {
+    return errorResponse(toCrawlFailure(error))
+  }
+}
+
+async function openItemLink(
+  message: OpenItemLinkMessage,
+): Promise<RuntimeResponse<OpenItemLinkResult>> {
+  const targetUrl = normalizeTargetUrl(message.payload.url)
+
+  if (!targetUrl) {
+    return errorResponse(
+      new CrawlFailure('INVALID_REQUEST', '아이템 URL 형식이 올바르지 않습니다.'),
+    )
+  }
+
+  try {
+    if (message.payload.newTab) {
+      const tab = await chrome.tabs.create({
+        url: targetUrl,
+        active: false,
+      })
+
+      if (tab.id === undefined) {
+        return errorResponse(
+          new CrawlFailure('TAB_NOT_FOUND', '새 탭을 열 수 없습니다.'),
+        )
+      }
+
+      return {
+        ok: true,
+        data: {
+          tabId: tab.id,
+          url: targetUrl,
+          newTab: true,
+        },
+      }
+    }
+
+    const activeTab = await getActiveTab()
+    const tab = await chrome.tabs.update(activeTab.id, {
+      url: targetUrl,
+      active: true,
+    })
+    const updatedTabId = tab?.id ?? activeTab.id
+
+    if (!updatedTabId) {
+      return errorResponse(
+        new CrawlFailure('TAB_NOT_FOUND', '현재 탭에서 링크를 열 수 없습니다.'),
+      )
+    }
+
+    return {
+      ok: true,
+      data: {
+        tabId: updatedTabId,
+        url: targetUrl,
+        newTab: false,
       },
     }
   } catch (error) {
@@ -520,6 +495,7 @@ function isRuntimeRequestMessage(message: unknown): message is RuntimeRequestMes
   const maybeMessage = message as { type?: string }
   return (
     maybeMessage.type === 'OPEN_TARGET_SITE' ||
+    maybeMessage.type === 'OPEN_ITEM_LINK' ||
     maybeMessage.type === 'CRAWL_ACTIVE_TAB' ||
     maybeMessage.type === 'SET_PRIVACY_SCREEN_BLUR'
   )
@@ -577,6 +553,11 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
 
   if (message.type === 'OPEN_TARGET_SITE') {
     void openTargetSite(message).then(sendResponse)
+    return true
+  }
+
+  if (message.type === 'OPEN_ITEM_LINK') {
+    void openItemLink(message).then(sendResponse)
     return true
   }
 

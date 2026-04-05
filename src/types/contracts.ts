@@ -62,6 +62,11 @@ export interface OpenTargetSitePayload {
   targetUrl?: string
 }
 
+export interface OpenItemLinkPayload {
+  url: string
+  newTab?: boolean
+}
+
 export interface CrawlActiveTabPayload {
   siteId: string
   targetUrl?: string
@@ -88,6 +93,11 @@ export interface OpenTargetSiteMessage {
   payload: OpenTargetSitePayload
 }
 
+export interface OpenItemLinkMessage {
+  type: 'OPEN_ITEM_LINK'
+  payload: OpenItemLinkPayload
+}
+
 export interface CrawlActiveTabMessage {
   type: 'CRAWL_ACTIVE_TAB'
   payload: CrawlActiveTabPayload
@@ -110,6 +120,7 @@ export interface CrawlErrorMessage {
 
 export type RuntimeRequestMessage =
   | OpenTargetSiteMessage
+  | OpenItemLinkMessage
   | CrawlActiveTabMessage
   | SetPrivacyScreenBlurMessage
 export type RuntimeEventMessage = CrawlResultMessage | CrawlErrorMessage
@@ -119,6 +130,12 @@ export interface OpenTargetSiteResult {
   siteId: string
   tabId: number
   url: string
+}
+
+export interface OpenItemLinkResult {
+  tabId: number
+  url: string
+  newTab: boolean
 }
 
 export interface CrawlSummary {

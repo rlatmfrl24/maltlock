@@ -22,6 +22,7 @@ interface RankedParsedItem extends ParsedItem {
 
 interface NimiApiUploader {
   handle?: string | null
+  display_name?: string | null
 }
 
 interface NimiApiPost {
@@ -30,6 +31,7 @@ interface NimiApiPost {
 }
 
 interface NimiApiVideo {
+  video_id?: string | number | null
   id?: string | number | null
   title?: string | null
   direct_url?: string | null
@@ -43,6 +45,8 @@ interface NimiApiResponse {
   success?: boolean
   data?: NimiApiVideo[]
 }
+
+type NimiApiPayload = NimiApiResponse | NimiApiVideo[]
 
 interface HtmlPreviewMatch {
   altText?: string
@@ -217,29 +221,63 @@ function formatViewSnippet(playCount: number | null | undefined): string | undef
   return `조회수 ${playCount}`
 }
 
+function extractApiVideos(payload: NimiApiPayload): NimiApiVideo[] | undefined {
+  if (Array.isArray(payload)) {
+    return payload
+  }
+
+  if (Array.isArray(payload.data)) {
+    return payload.data
+  }
+
+  return undefined
+}
+
+function deriveApiTitle(video: NimiApiVideo): string | undefined {
+  const explicitTitle = toOptionalText(video.title)
+  if (explicitTitle) {
+    return explicitTitle
+  }
+
+  const firstPost = video.posts?.[0]
+  const displayName = toOptionalText(firstPost?.uploader?.display_name)
+  if (displayName) {
+    return `${displayName}님의 동영상`
+  }
+
+  const handle = toOptionalText(firstPost?.uploader?.handle)
+  if (handle) {
+    return `${handle}님의 동영상`
+  }
+
+  return undefined
+}
+
 function parseApiPayload(input: string, pageUrl: string): ParsedItem[] | undefined {
   const trimmed = input.trim()
 
-  if (!trimmed.startsWith('{')) {
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
     return undefined
   }
 
-  let parsedResponse: NimiApiResponse
+  let parsedPayload: NimiApiPayload
 
   try {
-    parsedResponse = JSON.parse(trimmed) as NimiApiResponse
+    parsedPayload = JSON.parse(trimmed) as NimiApiPayload
   } catch {
     return undefined
   }
 
-  if (!Array.isArray(parsedResponse.data)) {
+  const videos = extractApiVideos(parsedPayload)
+
+  if (!Array.isArray(videos)) {
     return undefined
   }
 
   const parsedItems: RankedParsedItem[] = []
   let entryIndex = 0
 
-  for (const video of parsedResponse.data) {
+  for (const video of videos) {
     const rawVideoUrl = `${video.direct_url ?? ''}`.trim()
     const rawPreviewImageUrl = `${video.thumbnail_url ?? ''}`.trim()
 
@@ -255,12 +293,13 @@ function parseApiPayload(input: string, pageUrl: string): ParsedItem[] | undefin
       ? toAbsoluteUrl(rawPreviewImageUrl, pageUrl)
       : undefined
     const normalizedStatusUrl = extractFirstStatusUrl(video.posts)
-    const explicitVideoId = `${video.id ?? ''}`.trim() || undefined
+    const explicitVideoId =
+      `${video.video_id ?? video.id ?? ''}`.trim() || undefined
 
     parsedItems.push({
       title: buildTitle(
         rankOrder,
-        toOptionalText(video.title),
+        deriveApiTitle(video),
         normalizedStatusUrl ?? normalizedVideoUrl,
       ),
       url: normalizedVideoUrl,

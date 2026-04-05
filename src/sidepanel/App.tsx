@@ -1,8 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+} from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { targetSites } from '../config/targets'
 import {
   deleteCrawledItem,
+  listItemCountsBySite,
   listCrawlRunsBySite,
   listItemsBySite,
 } from '../db/repository'
@@ -12,6 +20,7 @@ import type {
   CrawlErrorCode,
   CrawlSummary,
   OpenTargetSiteResult,
+  OpenItemLinkResult,
   SetPrivacyScreenBlurResult,
 } from '../types/contracts'
 
@@ -34,6 +43,9 @@ const DATE_TIME_FORMATTER = new Intl.DateTimeFormat('ko-KR', {
   timeStyle: 'medium',
 })
 const TARGET_SITE_BY_ID = new Map(targetSites.map((site) => [site.id, site]))
+const EMPTY_COUNTS_BY_SITE: Record<string, number> = Object.fromEntries(
+  targetSites.map((site) => [site.id, 0]),
+)
 const STATUS_LABEL_BY_KIND: Record<StatusKind, string> = {
   idle: '안내',
   loading: '진행 중',
@@ -129,6 +141,10 @@ function getTitleLinkUrl(item: CrawledItem): string {
   return item.url
 }
 
+function shouldOpenItemInNewTab(event: MouseEvent<HTMLAnchorElement>): boolean {
+  return event.ctrlKey || event.metaKey
+}
+
 function App() {
   const defaultSiteId = targetSites[0]?.id ?? ''
   const [activeSiteId, setActiveSiteId] = useState(defaultSiteId)
@@ -199,6 +215,22 @@ function App() {
     },
     [activeSiteId],
     null,
+  )
+
+  const itemCountsBySite = useLiveQuery(
+    async () => listItemCountsBySite(targetSites.map((site) => site.id)),
+    [],
+    EMPTY_COUNTS_BY_SITE,
+  )
+
+  const activeSiteItemCount = activeSiteId ? (itemCountsBySite[activeSiteId] ?? 0) : 0
+  const totalStoredItemCount = useMemo(
+    () =>
+      Object.values(itemCountsBySite).reduce(
+        (total, siteCount) => total + siteCount,
+        0,
+      ),
+    [itemCountsBySite],
   )
 
   async function handleOpenSite(siteId: string): Promise<void> {
@@ -337,6 +369,43 @@ function App() {
     }
   }, [])
 
+  const handleOpenItemLink = useCallback(
+    async (url: string, newTab: boolean): Promise<void> => {
+      const response = await sendRuntimeRequest<OpenItemLinkResult>({
+        type: 'OPEN_ITEM_LINK',
+        payload: { url, newTab },
+      })
+
+      if (!response.ok) {
+        setStatus({
+          kind: 'error',
+          message: `${mapError(response.error.code)}${response.error.detail ? ` (${response.error.detail})` : ''}`,
+        })
+      }
+    },
+    [],
+  )
+
+  const handleItemLinkClick = useCallback(
+    (event: MouseEvent<HTMLAnchorElement>, url: string): void => {
+      event.preventDefault()
+      void handleOpenItemLink(url, shouldOpenItemInNewTab(event))
+    },
+    [handleOpenItemLink],
+  )
+
+  const handleItemLinkAuxClick = useCallback(
+    (event: MouseEvent<HTMLAnchorElement>, url: string): void => {
+      if (event.button !== 1) {
+        return
+      }
+
+      event.preventDefault()
+      void handleOpenItemLink(url, true)
+    },
+    [handleOpenItemLink],
+  )
+
   function handleSiteUrlChange(siteId: string, value: string): void {
     setSiteUrls((previous) => ({
       ...previous,
@@ -388,65 +457,84 @@ function App() {
       )
     }
 
-    return items.map((item) => (
-      <li key={item.id} className="item-row">
-        <div className={`item-main ${isPrivacyMode ? 'item-main-privacy' : ''}`}>
-          {!isPrivacyMode ? (
-            item.previewImageUrl ? (
-              <img
-                src={item.previewImageUrl}
-                alt={item.title}
-                className="item-preview"
-                loading="lazy"
-              />
-            ) : (
-              <div className="item-preview item-preview-empty">No Image</div>
-            )
-          ) : null}
-          <div className="item-content">
-            <a
-              href={getTitleLinkUrl(item)}
-              target="_blank"
-              rel="noreferrer"
-              className="item-title"
-              title={item.title}
-            >
-              {item.title}
-            </a>
-            <a
-              href={item.url}
-              target="_blank"
-              rel="noreferrer"
-              className="item-url"
-              title={item.url}
-            >
-              {item.url}
-            </a>
-            <div className="item-meta">
-              <span className="meta-tag">{formatDateTime(item.crawledAt)}</span>
-              {item.summary ? (
-                <span className="item-summary" title={item.summary}>
-                  {item.summary}
-                </span>
-              ) : null}
-            </div>
-            <div className="item-actions">
-              <button
-                type="button"
-                className="delete-button"
-                onClick={() => {
-                  void handleDeleteItem(item.id)
+    return items.map((item) => {
+      const titleLinkUrl = getTitleLinkUrl(item)
+
+      return (
+        <li key={item.id} className="item-row">
+          <div className={`item-main ${isPrivacyMode ? 'item-main-privacy' : ''}`}>
+            {!isPrivacyMode ? (
+              item.previewImageUrl ? (
+                <img
+                  src={item.previewImageUrl}
+                  alt={item.title}
+                  className="item-preview"
+                  loading="lazy"
+                />
+              ) : (
+                <div className="item-preview item-preview-empty">No Image</div>
+              )
+            ) : null}
+            <div className="item-content">
+              <a
+                href={titleLinkUrl}
+                className="item-title"
+                title={item.title}
+                onClick={(event) => {
+                  handleItemLinkClick(event, titleLinkUrl)
                 }}
-                disabled={deletingItemId === item.id}
+                onAuxClick={(event) => {
+                  handleItemLinkAuxClick(event, titleLinkUrl)
+                }}
               >
-                {deletingItemId === item.id ? '삭제 중...' : '삭제'}
-              </button>
+                {item.title}
+              </a>
+              <a
+                href={item.url}
+                className="item-url"
+                title={item.url}
+                onClick={(event) => {
+                  handleItemLinkClick(event, item.url)
+                }}
+                onAuxClick={(event) => {
+                  handleItemLinkAuxClick(event, item.url)
+                }}
+              >
+                {item.url}
+              </a>
+              <div className="item-meta">
+                <span className="meta-tag">{formatDateTime(item.crawledAt)}</span>
+                {item.summary ? (
+                  <span className="item-summary" title={item.summary}>
+                    {item.summary}
+                  </span>
+                ) : null}
+              </div>
+              <div className="item-actions">
+                <button
+                  type="button"
+                  className="delete-button"
+                  onClick={() => {
+                    void handleDeleteItem(item.id)
+                  }}
+                  disabled={deletingItemId === item.id}
+                >
+                  {deletingItemId === item.id ? '삭제 중...' : '삭제'}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      </li>
-    ))
-  }, [deletingItemId, handleDeleteItem, isPrivacyMode, items])
+        </li>
+      )
+    })
+  }, [
+    deletingItemId,
+    handleDeleteItem,
+    handleItemLinkAuxClick,
+    handleItemLinkClick,
+    isPrivacyMode,
+    items,
+  ])
 
   return (
     <main className="panel-shell">
@@ -458,7 +546,8 @@ function App() {
         <p className="panel-subtitle">현재 탭 이동 → 크롤 실행 → 저장 결과 검토</p>
         <div className="header-meta">
           <span className="meta-pill">선택: {activeSiteName}</span>
-          <span className="meta-pill">저장: {items.length}건</span>
+          <span className="meta-pill">선택 사이트: {activeSiteItemCount}건</span>
+          <span className="meta-pill">전체 저장: {totalStoredItemCount}건</span>
         </div>
       </header>
 
@@ -477,7 +566,8 @@ function App() {
                 void handleOpenSite(site.id)
               }}
             >
-              {site.name}
+              <span className="chip-label">{site.name}</span>
+              <span className="chip-count">{itemCountsBySite[site.id] ?? 0}</span>
             </button>
           ))}
         </div>
