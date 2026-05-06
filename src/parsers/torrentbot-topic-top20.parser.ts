@@ -6,6 +6,21 @@ const TITLE_LINK_REGEX =
   /<li class="tit[^"]*">\s*<a href="([^"]+)">([\s\S]*?)<\/a>\s*<\/li>/i
 const PLAIN_LI_REGEX = /<li>\s*([^<]+?)\s*<\/li>/gi
 
+function toDomainlessPath(url: string): string | undefined {
+  try {
+    const parsed = new URL(url)
+    const path = parsed.pathname.trim()
+    return path || undefined
+  } catch {
+    return undefined
+  }
+}
+
+function buildDedupeKey(url: string): string | undefined {
+  const path = toDomainlessPath(url)
+  return path ? `torrentbot:path:${path}` : undefined
+}
+
 export const torrentbotTopicTop20Parser: SiteParser = (
   html: string,
   pageUrl: string,
@@ -39,9 +54,12 @@ export const torrentbotTopicTop20Parser: SiteParser = (
       continue
     }
 
+    const absoluteUrl = toAbsoluteUrl(rawUrl, pageUrl)
+
     parsed.push({
       title,
-      url: toAbsoluteUrl(rawUrl, pageUrl),
+      url: absoluteUrl,
+      dedupeKey: buildDedupeKey(absoluteUrl),
       summary: `${rank ? `${rank}위` : ''}${rank && date ? ' · ' : ''}${date}`,
     })
   }

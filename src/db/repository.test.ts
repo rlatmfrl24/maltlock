@@ -43,6 +43,61 @@ describe('repository', () => {
     expect(first).toBe(second)
   })
 
+  it('skips legacy torrentbot records by path when only the domain changes', async () => {
+    const legacyId = createItemId(
+      'torrentbot-topic-top20',
+      'https://torrentbot230.site/topic/520409',
+      'Same Topic',
+    )
+
+    await db.items.put({
+      id: legacyId,
+      siteId: 'torrentbot-topic-top20',
+      title: 'Same Topic',
+      url: 'https://torrentbot230.site/topic/520409',
+      crawledAt: 100,
+    })
+    await db.crawledItemLogs.put({
+      id: legacyId,
+      siteId: 'torrentbot-topic-top20',
+      itemId: legacyId,
+      firstSeenAt: 100,
+      lastSeenAt: 150,
+      seenCount: 4,
+    })
+
+    const result = await upsertCrawledItems(
+      'torrentbot-topic-top20',
+      [
+        {
+          title: 'Same Topic',
+          url: 'https://torrentbot999.site/topic/520409',
+          dedupeKey: 'torrentbot:path:/topic/520409',
+        },
+      ],
+      200,
+    )
+    const items = await listItemsBySite('torrentbot-topic-top20')
+    const pathId = createItemId(
+      'torrentbot-topic-top20',
+      'https://torrentbot999.site/topic/520409',
+      'Same Topic',
+      'torrentbot:path:/topic/520409',
+    )
+    const pathLog = await db.crawledItemLogs.get(pathId)
+
+    expect(result.insertedCount).toBe(0)
+    expect(result.skippedCount).toBe(1)
+    expect(items).toHaveLength(1)
+    expect(items[0]?.id).toBe(legacyId)
+    expect(pathLog).toMatchObject({
+      itemId: legacyId,
+      firstSeenAt: 100,
+      lastSeenAt: 200,
+      seenCount: 5,
+    })
+  })
+
   it('skips already logged items instead of updating existing records', async () => {
     await upsertCrawledItems(
       'hacker-news',

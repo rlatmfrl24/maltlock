@@ -23,13 +23,6 @@ export const targetSites: TargetSite[] = [
     parserId: "twidouga-ranking-t1",
   },
   {
-    id: "xranking-ranking",
-    name: "XRANKING",
-    url: "https://xranking.site/ranking",
-    matchPatterns: ["https://xranking.site/*"],
-    parserId: "xranking-ranking",
-  },
-  {
     id: "nimi-tw-ranking",
     name: "NimiWiki",
     url: "https://tw.nimi.wiki/",

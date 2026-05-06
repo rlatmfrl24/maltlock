@@ -21,10 +21,28 @@ describe('torrentbotTopicTop20Parser', () => {
     const first = items[0]
     expect(first?.title).toBe('군산대 할카스 보지에 점있는 녀 3V19P')
     expect(first?.url).toBe('https://torrentbot230.site/topic/520409')
+    expect(first?.dedupeKey).toBe('torrentbot:path:/topic/520409')
     expect(first?.summary).toContain('1위')
     expect(first?.summary).toContain('12.11')
 
     const hasPreviewImage = items.some((item) => Boolean(item.previewImageUrl))
     expect(hasPreviewImage).toBe(false)
+  })
+
+  it('keeps dedupe keys stable when the torrentbot domain changes', () => {
+    const html = loadFixture()
+
+    const originalItems = torrentbotTopicTop20Parser(
+      html,
+      'https://torrentbot230.site/topic/index?top=20',
+    )
+    const movedItems = torrentbotTopicTop20Parser(
+      html,
+      'https://torrentbot999.site/topic/index?top=20',
+    )
+
+    expect(movedItems[0]?.url).toBe('https://torrentbot999.site/topic/520409')
+    expect(movedItems[0]?.dedupeKey).toBe(originalItems[0]?.dedupeKey)
+    expect(new Set(movedItems.map((item) => item.dedupeKey)).size).toBe(20)
   })
 })

@@ -9,6 +9,12 @@ import { hashString } from '../utils/hash'
 import { db } from './schema'
 
 const MAX_SNIPPET_LENGTH = 280
+const TORRENTBOT_SITE_ID = 'torrentbot-topic-top20'
+
+interface NormalizedCrawledItem {
+  item: CrawledItem
+  domainlessPath?: string
+}
 
 function normalizeUrl(input: string): string {
   try {
@@ -50,15 +56,68 @@ function clipSnippet(input: string | undefined): string | undefined {
   return `${normalized.slice(0, MAX_SNIPPET_LENGTH - 3)}...`
 }
 
-function dedupeByItemId(items: CrawledItem[]): CrawledItem[] {
-  const deduped = new Map<string, CrawledItem>()
+function normalizeDomainlessUrlPath(input: string): string | undefined {
+  try {
+    const parsed = new URL(input)
+    const path = parsed.pathname.trim().toLowerCase()
+    return path || undefined
+  } catch {
+    return undefined
+  }
+}
+
+function getDomainlessPathForSite(
+  siteId: string,
+  url: string,
+): string | undefined {
+  if (siteId !== TORRENTBOT_SITE_ID) {
+    return undefined
+  }
+
+  return normalizeDomainlessUrlPath(url)
+}
+
+function dedupeByItemId(items: NormalizedCrawledItem[]): NormalizedCrawledItem[] {
+  const deduped = new Map<string, NormalizedCrawledItem>()
 
   for (const item of items) {
     // Keep the latest value when the same id appears multiple times in one crawl batch.
-    deduped.set(item.id, item)
+    deduped.set(item.item.id, item)
   }
 
   return [...deduped.values()]
+}
+
+async function listExistingItemsByDomainlessPath(
+  siteId: string,
+  items: NormalizedCrawledItem[],
+): Promise<Map<string, CrawledItem>> {
+  if (siteId !== TORRENTBOT_SITE_ID) {
+    return new Map()
+  }
+
+  const paths = new Set(
+    items
+      .map((item) => item.domainlessPath)
+      .filter((path): path is string => Boolean(path)),
+  )
+
+  if (paths.size === 0) {
+    return new Map()
+  }
+
+  const existingItems = await db.items.where('siteId').equals(siteId).toArray()
+  const existingItemByPath = new Map<string, CrawledItem>()
+
+  for (const item of existingItems) {
+    const path = normalizeDomainlessUrlPath(item.url)
+
+    if (path && paths.has(path)) {
+      existingItemByPath.set(path, item)
+    }
+  }
+
+  return existingItemByPath
 }
 
 export interface UpsertCrawledItemsResult {
@@ -104,7 +163,7 @@ function normalizeParsedItem(
   siteId: string,
   item: ParsedItem,
   crawledAt: number,
-): CrawledItem | null {
+): NormalizedCrawledItem | null {
   const title = item.title.trim()
   const url = normalizeUrl(item.url)
 
@@ -113,15 +172,18 @@ function normalizeParsedItem(
   }
 
   return {
-    id: createItemId(siteId, url, title, item.dedupeKey),
-    siteId,
-    title,
-    url,
-    previewImageUrl: normalizePreviewImageUrl(item.previewImageUrl),
-    summary: item.summary?.trim() || undefined,
-    price: item.price,
-    rawHtmlSnippet: clipSnippet(item.rawHtmlSnippet),
-    crawledAt,
+    item: {
+      id: createItemId(siteId, url, title, item.dedupeKey),
+      siteId,
+      title,
+      url,
+      previewImageUrl: normalizePreviewImageUrl(item.previewImageUrl),
+      summary: item.summary?.trim() || undefined,
+      price: item.price,
+      rawHtmlSnippet: clipSnippet(item.rawHtmlSnippet),
+      crawledAt,
+    },
+    domainlessPath: getDomainlessPathForSite(siteId, url),
   }
 }
 
@@ -132,9 +194,9 @@ export async function upsertCrawledItems(
 ): Promise<UpsertCrawledItemsResult> {
   const normalized = items
     .map((item) => normalizeParsedItem(siteId, item, crawledAt))
-    .filter((item): item is CrawledItem => item !== null)
+    .filter((item): item is NormalizedCrawledItem => item !== null)
   const dedupedNormalized = dedupeByItemId(normalized)
-  const itemIds = dedupedNormalized.map((item) => item.id)
+  const itemIds = dedupedNormalized.map(({ item }) => item.id)
 
   if (dedupedNormalized.length === 0) {
     return {
@@ -146,10 +208,27 @@ export async function upsertCrawledItems(
 
   const existingLogs = await db.crawledItemLogs.bulkGet(itemIds)
   const existingItems = await db.items.bulkGet(itemIds)
+  const existingItemByDomainlessPath = await listExistingItemsByDomainlessPath(
+    siteId,
+    dedupedNormalized,
+  )
+  const domainlessPathItemIds = Array.from(
+    new Set([...existingItemByDomainlessPath.values()].map((item) => item.id)),
+  )
+  const domainlessPathItemLogs =
+    domainlessPathItemIds.length > 0
+      ? await db.crawledItemLogs.bulkGet(domainlessPathItemIds)
+      : []
   const existingLogById = new Map<string, CrawledItemLog>()
   for (const log of existingLogs) {
     if (log) {
       existingLogById.set(log.id, log)
+    }
+  }
+  const domainlessPathLogById = new Map<string, CrawledItemLog>()
+  for (const log of domainlessPathItemLogs) {
+    if (log) {
+      domainlessPathLogById.set(log.id, log)
     }
   }
   const existingItemById = new Map<string, CrawledItem>()
@@ -162,19 +241,29 @@ export async function upsertCrawledItems(
   const freshItems: CrawledItem[] = []
   const logsToWrite: CrawledItemLog[] = []
 
-  for (const item of dedupedNormalized) {
+  for (const normalizedItem of dedupedNormalized) {
+    const { item } = normalizedItem
     const existingLog = existingLogById.get(item.id)
 
     if (!existingLog) {
-      const existingItem = existingItemById.get(item.id)
+      const existingItem =
+        existingItemById.get(item.id) ??
+        (normalizedItem.domainlessPath
+          ? existingItemByDomainlessPath.get(normalizedItem.domainlessPath)
+          : undefined)
+
       if (existingItem) {
+        const sourceLog =
+          existingLogById.get(existingItem.id) ??
+          domainlessPathLogById.get(existingItem.id)
+
         logsToWrite.push({
-          id: existingItem.id,
+          id: item.id,
           siteId: existingItem.siteId,
           itemId: existingItem.id,
-          firstSeenAt: existingItem.crawledAt,
+          firstSeenAt: sourceLog?.firstSeenAt ?? existingItem.crawledAt,
           lastSeenAt: crawledAt,
-          seenCount: 2,
+          seenCount: (sourceLog?.seenCount ?? 1) + 1,
         })
         continue
       }
