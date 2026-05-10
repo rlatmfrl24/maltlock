@@ -152,6 +152,7 @@ function App() {
   const [isCrawling, setIsCrawling] = useState(false)
   const [isPrivacyMode, setIsPrivacyMode] = useState(getInitialPrivacyMode)
   const [isTogglingPrivacyMode, setIsTogglingPrivacyMode] = useState(false)
+  const [isListExpanded, setIsListExpanded] = useState(false)
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null)
   const initialPrivacyModeRef = useRef(isPrivacyMode)
 
@@ -536,7 +537,7 @@ function App() {
   ])
 
   return (
-    <main className="panel-shell">
+    <main className={`panel-shell ${isListExpanded ? 'panel-shell-list-expanded' : ''}`}>
       <header className="panel-header">
         <div className="panel-header-top">
           <h1>Maltlock Crawler</h1>
@@ -633,6 +634,16 @@ function App() {
             <p>최근 수집 결과를 확인하고 필요 없는 아이템을 정리하세요.</p>
           </div>
           <div className="list-controls">
+            <button
+              type="button"
+              className="list-expand-toggle"
+              aria-pressed={isListExpanded}
+              onClick={() => {
+                setIsListExpanded((previousValue) => !previousValue)
+              }}
+            >
+              {isListExpanded ? '기본 보기' : '리스트 크게 보기'}
+            </button>
             <button
               type="button"
               className={`privacy-toggle ${isPrivacyMode ? 'privacy-toggle-on' : ''}`}
