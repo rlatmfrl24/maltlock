@@ -23,6 +23,7 @@ interface RankedParsedItem extends ParsedItem {
 interface NimiApiUploader {
   handle?: string | null
   display_name?: string | null
+  name?: string | null
 }
 
 interface NimiApiPost {
@@ -77,11 +78,6 @@ function extractStatusId(statusUrl: string | undefined): string | undefined {
 function normalizeStatusUrl(statusUrl: string | undefined): string | undefined {
   if (!statusUrl) {
     return undefined
-  }
-
-  const statusId = extractStatusId(statusUrl)
-  if (statusId) {
-    return `https://x.com/i/status/${statusId}`
   }
 
   return statusUrl.trim()
@@ -189,14 +185,14 @@ function extractFirstStatusUrl(posts: NimiApiPost[] | null | undefined): string 
       continue
     }
 
-    const normalized = normalizeStatusUrl(`https://x.com/i/status/${postId}`)
-    if (normalized) {
-      return normalized
-    }
-
     const handle = cleanText(post.uploader?.handle ?? '')
     if (handle) {
       return normalizeStatusUrl(`https://x.com/${handle}/status/${postId}`)
+    }
+
+    const normalized = normalizeStatusUrl(`https://x.com/i/status/${postId}`)
+    if (normalized) {
+      return normalized
     }
   }
 
@@ -240,7 +236,9 @@ function deriveApiTitle(video: NimiApiVideo): string | undefined {
   }
 
   const firstPost = video.posts?.[0]
-  const displayName = toOptionalText(firstPost?.uploader?.display_name)
+  const displayName = toOptionalText(
+    firstPost?.uploader?.display_name ?? firstPost?.uploader?.name,
+  )
   if (displayName) {
     return `${displayName}님의 동영상`
   }
@@ -391,9 +389,12 @@ function parseHtmlFallback(input: string, pageUrl: string): ParsedItem[] {
     const rawVideoUrl =
       VIDEO_SRC_REGEX.exec(afterImageHtml)?.[0] ??
       VIDEO_SRC_REGEX.exec(beforeImageHtml)?.[0]
-    const normalizedVideoUrl = rawVideoUrl
-      ? toAbsoluteUrl(decodeHtmlEntities(rawVideoUrl), pageUrl)
-      : absolutePreviewImageUrl
+
+    if (!rawVideoUrl) {
+      continue
+    }
+
+    const normalizedVideoUrl = toAbsoluteUrl(decodeHtmlEntities(rawVideoUrl), pageUrl)
     const rawStatusUrl =
       STATUS_URL_REGEX.exec(beforeImageHtml)?.[0] ??
       STATUS_URL_REGEX.exec(afterImageHtml)?.[0]

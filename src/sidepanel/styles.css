@@ -90,13 +90,22 @@ input {
   display: none;
 }
 
+.panel-shell-list-expanded {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: max(14px, env(safe-area-inset-bottom));
+}
+
 .panel-shell-list-expanded .list-block {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 0 0 auto;
+  min-height: calc(100dvh - 28px);
+  overflow: visible;
 }
 
 .panel-shell-list-expanded .item-list {
+  flex: 0 0 auto;
   min-height: 0;
+  overflow: visible;
 }
 
 .panel-header {

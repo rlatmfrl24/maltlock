@@ -9,11 +9,18 @@ import { hashString } from '../utils/hash'
 import { db } from './schema'
 
 const MAX_SNIPPET_LENGTH = 280
-const TORRENTBOT_SITE_ID = 'torrentbot-topic-top20'
+const TWIMG_MEDIA_ID_REGEX =
+  /\/(?:amplify_video|ext_tw_video|amplify_video_thumb|ext_tw_video_thumb)\/(\d+)(?:\/|$)/i
+const TWEET_STATUS_ID_REGEX = /\/status\/(\d+)/i
+const DEDUPE_MEDIA_ID_REGEX = /(?:^|:)(?:video-id|preview-id):([^:\s]+)$/i
+const DEDUPE_TWEET_STATUS_ID_REGEX = /(?:^|:)tweet-status:(\d+)$/i
+const DEDUPE_PATH_REGEX = /(?:^|:)path:(\/.*)$/i
+const DEDUPE_VIDEO_PREVIEW_KEY_REGEX = /^(.+:)(video-id|preview-id):([^:\s]+)$/i
 
 interface NormalizedCrawledItem {
   item: CrawledItem
-  domainlessPath?: string
+  equivalentItemIds: string[]
+  stableFingerprints: string[]
 }
 
 function normalizeUrl(input: string): string {
@@ -56,25 +63,22 @@ function clipSnippet(input: string | undefined): string | undefined {
   return `${normalized.slice(0, MAX_SNIPPET_LENGTH - 3)}...`
 }
 
-function normalizeDomainlessUrlPath(input: string): string | undefined {
+function normalizeUrlPath(input: string): string | undefined {
   try {
     const parsed = new URL(input)
     const path = parsed.pathname.trim().toLowerCase()
-    return path || undefined
+    return path && path !== '/' ? path : undefined
   } catch {
     return undefined
   }
 }
 
-function getDomainlessPathForSite(
-  siteId: string,
-  url: string,
-): string | undefined {
-  if (siteId !== TORRENTBOT_SITE_ID) {
-    return undefined
-  }
+function addFingerprint(fingerprints: Set<string>, value: string | undefined): void {
+  const normalized = value?.trim().toLowerCase()
 
-  return normalizeDomainlessUrlPath(url)
+  if (normalized) {
+    fingerprints.add(normalized)
+  }
 }
 
 function dedupeByItemId(items: NormalizedCrawledItem[]): NormalizedCrawledItem[] {
@@ -88,36 +92,98 @@ function dedupeByItemId(items: NormalizedCrawledItem[]): NormalizedCrawledItem[]
   return [...deduped.values()]
 }
 
-async function listExistingItemsByDomainlessPath(
+function addUrlFingerprints(
+  fingerprints: Set<string>,
+  input: string | undefined,
+): void {
+  if (!input) {
+    return
+  }
+
+  const path = normalizeUrlPath(input)
+  if (path) {
+    addFingerprint(fingerprints, `url-path:${path}`)
+  }
+
+  const tweetStatusId = input.match(TWEET_STATUS_ID_REGEX)?.[1]
+  if (tweetStatusId) {
+    addFingerprint(fingerprints, `tweet-status:${tweetStatusId}`)
+  }
+
+  const mediaId = input.match(TWIMG_MEDIA_ID_REGEX)?.[1]
+  if (mediaId) {
+    addFingerprint(fingerprints, `media-id:${mediaId}`)
+  }
+}
+
+function addDedupeKeyFingerprints(
+  fingerprints: Set<string>,
+  dedupeKey: string | undefined,
+): void {
+  const normalizedDedupeKey = normalizeDedupeKey(dedupeKey)
+  if (!normalizedDedupeKey) {
+    return
+  }
+
+  const path = normalizedDedupeKey.match(DEDUPE_PATH_REGEX)?.[1]
+  if (path) {
+    addFingerprint(fingerprints, `url-path:${path}`)
+  }
+
+  const mediaId = normalizedDedupeKey.match(DEDUPE_MEDIA_ID_REGEX)?.[1]
+  if (mediaId) {
+    addFingerprint(fingerprints, `media-id:${mediaId}`)
+  }
+
+  const tweetStatusId = normalizedDedupeKey.match(DEDUPE_TWEET_STATUS_ID_REGEX)?.[1]
+  if (tweetStatusId) {
+    addFingerprint(fingerprints, `tweet-status:${tweetStatusId}`)
+  }
+}
+
+function createStableFingerprints(
+  item: Pick<CrawledItem, 'url' | 'previewImageUrl' | 'summary'> & {
+    dedupeKey?: string
+  },
+): string[] {
+  const fingerprints = new Set<string>()
+
+  addUrlFingerprints(fingerprints, item.url)
+  addUrlFingerprints(fingerprints, item.previewImageUrl)
+  addUrlFingerprints(fingerprints, item.summary)
+  addDedupeKeyFingerprints(fingerprints, item.dedupeKey)
+
+  return [...fingerprints]
+}
+
+async function listExistingItemsByStableFingerprint(
   siteId: string,
   items: NormalizedCrawledItem[],
 ): Promise<Map<string, CrawledItem>> {
-  if (siteId !== TORRENTBOT_SITE_ID) {
-    return new Map()
-  }
-
-  const paths = new Set(
+  const targetFingerprints = new Set(
     items
-      .map((item) => item.domainlessPath)
-      .filter((path): path is string => Boolean(path)),
+      .flatMap((item) => item.stableFingerprints)
+      .filter((fingerprint) => Boolean(fingerprint)),
   )
 
-  if (paths.size === 0) {
+  if (targetFingerprints.size === 0) {
     return new Map()
   }
 
   const existingItems = await db.items.where('siteId').equals(siteId).toArray()
-  const existingItemByPath = new Map<string, CrawledItem>()
+  const existingItemByFingerprint = new Map<string, CrawledItem>()
 
   for (const item of existingItems) {
-    const path = normalizeDomainlessUrlPath(item.url)
+    const stableFingerprints = createStableFingerprints(item)
 
-    if (path && paths.has(path)) {
-      existingItemByPath.set(path, item)
+    for (const stableFingerprint of stableFingerprints) {
+      if (targetFingerprints.has(stableFingerprint)) {
+        existingItemByFingerprint.set(stableFingerprint, item)
+      }
     }
   }
 
-  return existingItemByPath
+  return existingItemByFingerprint
 }
 
 export interface UpsertCrawledItemsResult {
@@ -159,6 +225,38 @@ function createItemLog(item: CrawledItem): CrawledItemLog {
   }
 }
 
+function getEquivalentDedupeKeys(
+  _siteId: string,
+  dedupeKey: string | undefined,
+): string[] {
+  const normalizedDedupeKey = normalizeDedupeKey(dedupeKey)
+  if (!normalizedDedupeKey) {
+    return []
+  }
+
+  const videoPreviewMatch = normalizedDedupeKey.match(DEDUPE_VIDEO_PREVIEW_KEY_REGEX)
+  if (videoPreviewMatch) {
+    const prefix = videoPreviewMatch[1] ?? ''
+    const identityType = videoPreviewMatch[2]
+    const identityValue = videoPreviewMatch[3]
+    const equivalentType = identityType === 'video-id' ? 'preview-id' : 'video-id'
+    return [`${prefix}${equivalentType}:${identityValue}`]
+  }
+
+  return []
+}
+
+function createEquivalentItemIds(
+  siteId: string,
+  url: string,
+  title: string,
+  dedupeKey: string | undefined,
+): string[] {
+  return getEquivalentDedupeKeys(siteId, dedupeKey).map((equivalentDedupeKey) =>
+    createItemId(siteId, url, title, equivalentDedupeKey),
+  )
+}
+
 function normalizeParsedItem(
   siteId: string,
   item: ParsedItem,
@@ -171,19 +269,25 @@ function normalizeParsedItem(
     return null
   }
 
+  const normalizedItem: CrawledItem = {
+    id: createItemId(siteId, url, title, item.dedupeKey),
+    siteId,
+    title,
+    url,
+    previewImageUrl: normalizePreviewImageUrl(item.previewImageUrl),
+    summary: item.summary?.trim() || undefined,
+    price: item.price,
+    rawHtmlSnippet: clipSnippet(item.rawHtmlSnippet),
+    crawledAt,
+  }
+
   return {
-    item: {
-      id: createItemId(siteId, url, title, item.dedupeKey),
-      siteId,
-      title,
-      url,
-      previewImageUrl: normalizePreviewImageUrl(item.previewImageUrl),
-      summary: item.summary?.trim() || undefined,
-      price: item.price,
-      rawHtmlSnippet: clipSnippet(item.rawHtmlSnippet),
-      crawledAt,
-    },
-    domainlessPath: getDomainlessPathForSite(siteId, url),
+    item: normalizedItem,
+    equivalentItemIds: createEquivalentItemIds(siteId, url, title, item.dedupeKey),
+    stableFingerprints: createStableFingerprints({
+      ...normalizedItem,
+      dedupeKey: item.dedupeKey,
+    }),
   }
 }
 
@@ -208,16 +312,27 @@ export async function upsertCrawledItems(
 
   const existingLogs = await db.crawledItemLogs.bulkGet(itemIds)
   const existingItems = await db.items.bulkGet(itemIds)
-  const existingItemByDomainlessPath = await listExistingItemsByDomainlessPath(
+  const equivalentItemIds = Array.from(
+    new Set(dedupedNormalized.flatMap((item) => item.equivalentItemIds)),
+  )
+  const equivalentLogs =
+    equivalentItemIds.length > 0
+      ? await db.crawledItemLogs.bulkGet(equivalentItemIds)
+      : []
+  const equivalentItems =
+    equivalentItemIds.length > 0 ? await db.items.bulkGet(equivalentItemIds) : []
+  const existingItemByStableFingerprint = await listExistingItemsByStableFingerprint(
     siteId,
     dedupedNormalized,
   )
-  const domainlessPathItemIds = Array.from(
-    new Set([...existingItemByDomainlessPath.values()].map((item) => item.id)),
+  const stableFingerprintItemIds = Array.from(
+    new Set(
+      [...existingItemByStableFingerprint.values()].map((item) => item.id),
+    ),
   )
-  const domainlessPathItemLogs =
-    domainlessPathItemIds.length > 0
-      ? await db.crawledItemLogs.bulkGet(domainlessPathItemIds)
+  const stableFingerprintItemLogs =
+    stableFingerprintItemIds.length > 0
+      ? await db.crawledItemLogs.bulkGet(stableFingerprintItemIds)
       : []
   const existingLogById = new Map<string, CrawledItemLog>()
   for (const log of existingLogs) {
@@ -225,10 +340,14 @@ export async function upsertCrawledItems(
       existingLogById.set(log.id, log)
     }
   }
-  const domainlessPathLogById = new Map<string, CrawledItemLog>()
-  for (const log of domainlessPathItemLogs) {
+  for (const log of equivalentLogs) {
     if (log) {
-      domainlessPathLogById.set(log.id, log)
+      existingLogById.set(log.id, log)
+    }
+  }
+  for (const log of stableFingerprintItemLogs) {
+    if (log) {
+      existingLogById.set(log.id, log)
     }
   }
   const existingItemById = new Map<string, CrawledItem>()
@@ -237,25 +356,44 @@ export async function upsertCrawledItems(
       existingItemById.set(existingItem.id, existingItem)
     }
   }
+  for (const existingItem of equivalentItems) {
+    if (existingItem) {
+      existingItemById.set(existingItem.id, existingItem)
+    }
+  }
+  for (const existingItem of existingItemByStableFingerprint.values()) {
+    existingItemById.set(existingItem.id, existingItem)
+  }
 
   const freshItems: CrawledItem[] = []
   const logsToWrite: CrawledItemLog[] = []
 
   for (const normalizedItem of dedupedNormalized) {
     const { item } = normalizedItem
-    const existingLog = existingLogById.get(item.id)
+    const existingLog =
+      existingLogById.get(item.id) ??
+      normalizedItem.equivalentItemIds
+        .map((equivalentItemId) => existingLogById.get(equivalentItemId))
+        .find((equivalentLog): equivalentLog is CrawledItemLog =>
+          Boolean(equivalentLog),
+        )
 
     if (!existingLog) {
       const existingItem =
         existingItemById.get(item.id) ??
-        (normalizedItem.domainlessPath
-          ? existingItemByDomainlessPath.get(normalizedItem.domainlessPath)
-          : undefined)
+        normalizedItem.equivalentItemIds
+          .map((equivalentItemId) => existingItemById.get(equivalentItemId))
+          .find((equivalentItem): equivalentItem is CrawledItem =>
+            Boolean(equivalentItem),
+          ) ??
+        normalizedItem.stableFingerprints
+          .map((stableFingerprint) =>
+            existingItemByStableFingerprint.get(stableFingerprint),
+          )
+          .find((stableItem): stableItem is CrawledItem => Boolean(stableItem))
 
       if (existingItem) {
-        const sourceLog =
-          existingLogById.get(existingItem.id) ??
-          domainlessPathLogById.get(existingItem.id)
+        const sourceLog = existingLogById.get(existingItem.id)
 
         logsToWrite.push({
           id: item.id,

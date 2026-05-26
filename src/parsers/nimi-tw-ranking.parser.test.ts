@@ -26,7 +26,7 @@ describe('nimiTwRankingParser', () => {
     expect(first?.previewImageUrl).toBe(
       'https://pbs.twimg.com/amplify_video_thumb/1959105747834544128/img/3_Cl2_pnkSbRf3IP.jpg?name=orig',
     )
-    expect(first?.summary).toBe('https://x.com/i/status/1959105847151534126')
+    expect(first?.summary).toBe('https://x.com/fancha1111/status/1959105847151534126')
     expect(first?.dedupeKey).toBe('nimi:video-id:1959105747834544128')
     expect(first?.rawHtmlSnippet).toBe('조회수 7403')
 
@@ -83,27 +83,57 @@ describe('nimiTwRankingParser', () => {
     expect(items[0]?.previewImageUrl).toBe(
       'https://pbs.twimg.com/ext_tw_video_thumb/2040767762675736576/pu/img/RffKoXzOQWfR9U-R.jpg?name=small',
     )
-    expect(items[0]?.summary).toBe('https://x.com/i/status/2040767780975448378')
+    expect(items[0]?.summary).toBe('https://x.com/baji46392/status/2040767780975448378')
     expect(items[0]?.dedupeKey).toBe('nimi:video-id:2040767762675736576')
     expect(items[0]?.rawHtmlSnippet).toBe('조회수 527')
   })
 
-  it('falls back to parsing hydrated html cards when api json is unavailable', () => {
+  it('does not store thumbnail-only html cards when api json is unavailable', () => {
     const html = loadHtmlFixture()
 
     const items = nimiTwRankingParser(html, 'https://tw.nimi.wiki/')
 
-    expect(items).toHaveLength(2)
-    expect(items[0]?.title).toBe('1위 - Taina Osborn님의 동영상')
+    expect(items).toHaveLength(0)
+  })
+
+  it('extracts original tweet links and video links from the current nimi api shape', () => {
+    const payload = JSON.stringify([
+      {
+        id: '2054119491395858432',
+        thumbnail_url:
+          'https://pbs.twimg.com/amplify_video_thumb/2054119491395858432/img/Uvxu5VE_fXU5BQio.jpg?name=orig',
+        direct_url:
+          'https://video.twimg.com/amplify_video/2054119491395858432/vid/avc1/1280x720/zkA16ktZJFwEolKg.mp4?tag=14',
+        duration: 247,
+        posts: [
+          {
+            id: '2054120219122725174',
+            posted_at: '2026-05-24T01:05:00+09:00',
+            uploader: {
+              handle: 'jiyun_example',
+              name: '지윤',
+            },
+          },
+        ],
+        play_count: 44600,
+      },
+    ])
+
+    const items = nimiTwRankingParser(payload, 'https://tw1.nimi.wiki/ko/ranking/week')
+
+    expect(items).toHaveLength(1)
+    expect(items[0]?.title).toBe('1위 - 지윤님의 동영상')
     expect(items[0]?.url).toBe(
-      'https://pbs.twimg.com/amplify_video_thumb/2031597073586597889/img/ol771CkhT_lhpB1d.jpg?name=orig',
+      'https://video.twimg.com/amplify_video/2054119491395858432/vid/avc1/1280x720/zkA16ktZJFwEolKg.mp4?tag=14',
     )
     expect(items[0]?.previewImageUrl).toBe(
-      'https://pbs.twimg.com/amplify_video_thumb/2031597073586597889/img/ol771CkhT_lhpB1d.jpg?name=orig',
+      'https://pbs.twimg.com/amplify_video_thumb/2054119491395858432/img/Uvxu5VE_fXU5BQio.jpg?name=orig',
     )
-    expect(items[0]?.summary).toBe('https://x.com/i/status/2031597249218884054')
-    expect(items[0]?.dedupeKey).toBe('nimi:preview-id:2031597073586597889')
-    expect(items[0]?.rawHtmlSnippet).toBe('조회수 379')
+    expect(items[0]?.summary).toBe(
+      'https://x.com/jiyun_example/status/2054120219122725174',
+    )
+    expect(items[0]?.dedupeKey).toBe('nimi:video-id:2054119491395858432')
+    expect(items[0]?.rawHtmlSnippet).toBe('조회수 44600')
   })
 
   it('dedupes duplicate video ids and keeps the higher rank item', () => {

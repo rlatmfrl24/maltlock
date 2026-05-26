@@ -1,5 +1,6 @@
 export type NimiView = 'ranking' | 'realtime' | 'recent'
 export type NimiPeriod = 'hourly' | 'daily' | 'weekly' | 'monthly'
+type NimiApiPeriod = 'hour' | 'day' | 'week' | 'month'
 
 const ACTIVE_TAB_ELEMENT_REGEX =
   /<(?:button|a)\b[^>]*class=["'][^"']*(?:tab-active|bg-violet-500\/20)[^"']*["'][^>]*>([\s\S]*?)<\/(?:button|a)>/gi
@@ -15,6 +16,12 @@ const PERIOD_BY_QUERY_VALUE: Record<string, NimiPeriod> = {
   weekly: 'weekly',
   month: 'monthly',
   monthly: 'monthly',
+}
+const API_PERIOD_BY_PERIOD: Record<NimiPeriod, NimiApiPeriod> = {
+  hourly: 'hour',
+  daily: 'day',
+  weekly: 'week',
+  monthly: 'month',
 }
 
 function stripHtmlTags(input: string): string {
@@ -56,6 +63,19 @@ function getNimiPeriodFromTabUrl(tabUrl: string): NimiPeriod | undefined {
   try {
     const parsed = new URL(tabUrl)
 
+    const segments = parsed.pathname
+      .split('/')
+      .map(normalizePathSegment)
+      .filter(Boolean)
+
+    for (const segment of segments) {
+      const matched = PERIOD_BY_QUERY_VALUE[segment]
+
+      if (matched) {
+        return matched
+      }
+    }
+
     for (const key of ['period', 'time', 'range', 'filter']) {
       const rawValue = normalizePathSegment(parsed.searchParams.get(key) ?? '')
       const matched = PERIOD_BY_QUERY_VALUE[rawValue]
@@ -69,6 +89,20 @@ function getNimiPeriodFromTabUrl(tabUrl: string): NimiPeriod | undefined {
   }
 
   return undefined
+}
+
+function getNimiApiOrigin(tabUrl: string): string | undefined {
+  try {
+    const parsed = new URL(tabUrl)
+
+    if (parsed.hostname === 'tw.nimi.wiki') {
+      return 'https://tw1.nimi.wiki'
+    }
+
+    return parsed.origin
+  } catch {
+    return undefined
+  }
 }
 
 export function getNimiActiveView(html: string, tabUrl: string): NimiView {
@@ -132,11 +166,8 @@ export function getNimiActivePeriod(html: string, tabUrl: string): NimiPeriod {
 }
 
 export function buildNimiApiUrl(html: string, tabUrl: string): string | undefined {
-  let origin: string
-
-  try {
-    origin = new URL(tabUrl).origin
-  } catch {
+  const origin = getNimiApiOrigin(tabUrl)
+  if (!origin) {
     return undefined
   }
 
@@ -144,7 +175,7 @@ export function buildNimiApiUrl(html: string, tabUrl: string): string | undefine
 
   if (activeView === 'ranking') {
     const activePeriod = getNimiActivePeriod(html, tabUrl)
-    return `${origin}/api/tw/ranking?period=${activePeriod}`
+    return `${origin}/api/tw/ranking/${API_PERIOD_BY_PERIOD[activePeriod]}`
   }
 
   return `${origin}/api/tw/${activeView}`

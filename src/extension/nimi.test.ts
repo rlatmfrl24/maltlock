@@ -18,11 +18,11 @@ describe('nimi helper', () => {
     expect(getNimiActiveView(html, 'https://tw.nimi.wiki/')).toBe('ranking')
     expect(getNimiActivePeriod(html, 'https://tw.nimi.wiki/')).toBe('hourly')
     expect(buildNimiApiUrl(html, 'https://tw.nimi.wiki/')).toBe(
-      'https://tw.nimi.wiki/api/tw/ranking?period=hourly',
+      'https://tw1.nimi.wiki/api/tw/ranking/hour',
     )
   })
 
-  it('uses the active period button text from the current nimi markup', () => {
+  it('uses the active period button text from legacy nimi markup', () => {
     const html = `
       <a class="tab-active text-white" href="ranking">인기</a>
       <button class="px-3 py-2 rounded-lg text-sm font-medium transition-all text-violet-200 hover:text-white hover:bg-white/10">1시간</button>
@@ -32,7 +32,25 @@ describe('nimi helper', () => {
 
     expect(getNimiActivePeriod(html, 'https://tw.nimi.wiki/')).toBe('weekly')
     expect(buildNimiApiUrl(html, 'https://tw.nimi.wiki/')).toBe(
-      'https://tw.nimi.wiki/api/tw/ranking?period=weekly',
+      'https://tw1.nimi.wiki/api/tw/ranking/week',
+    )
+  })
+
+  it('uses the current nimi route period segment', () => {
+    const html = `
+      <button class="tab-active">인기<span>1주</span></button>
+      <a href="/ko/realtime">실시간</a>
+      <a href="/ko/recent">신규</a>
+    `
+
+    expect(getNimiActiveView(html, 'https://tw1.nimi.wiki/ko/ranking/week')).toBe(
+      'ranking',
+    )
+    expect(getNimiActivePeriod(html, 'https://tw1.nimi.wiki/ko/ranking/week')).toBe(
+      'weekly',
+    )
+    expect(buildNimiApiUrl(html, 'https://tw1.nimi.wiki/ko/ranking/week')).toBe(
+      'https://tw1.nimi.wiki/api/tw/ranking/week',
     )
   })
 
@@ -44,11 +62,11 @@ describe('nimi helper', () => {
 
     expect(getNimiActiveView(html, 'https://tw.nimi.wiki/realtime')).toBe('realtime')
     expect(buildNimiApiUrl(html, 'https://tw.nimi.wiki/realtime')).toBe(
-      'https://tw.nimi.wiki/api/tw/realtime',
+      'https://tw1.nimi.wiki/api/tw/realtime',
     )
     expect(getNimiActiveView(html, 'https://tw.nimi.wiki/recent')).toBe('recent')
     expect(buildNimiApiUrl(html, 'https://tw.nimi.wiki/recent')).toBe(
-      'https://tw.nimi.wiki/api/tw/recent',
+      'https://tw1.nimi.wiki/api/tw/recent',
     )
   })
 
@@ -60,7 +78,7 @@ describe('nimi helper', () => {
 
     expect(getNimiActivePeriod(html, 'https://tw.nimi.wiki/?period=daily')).toBe('daily')
     expect(buildNimiApiUrl(html, 'https://tw.nimi.wiki/?period=daily')).toBe(
-      'https://tw.nimi.wiki/api/tw/ranking?period=daily',
+      'https://tw1.nimi.wiki/api/tw/ranking/day',
     )
   })
 })

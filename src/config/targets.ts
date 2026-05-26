@@ -25,8 +25,8 @@ export const targetSites: TargetSite[] = [
   {
     id: "nimi-tw-ranking",
     name: "NimiWiki",
-    url: "https://tw.nimi.wiki/",
-    matchPatterns: ["https://tw.nimi.wiki/*"],
+    url: "https://tw1.nimi.wiki/ko/ranking/week",
+    matchPatterns: ["https://tw.nimi.wiki/*", "https://tw1.nimi.wiki/*"],
     parserId: "nimi-tw-ranking",
   },
   {

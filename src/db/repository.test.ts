@@ -98,6 +98,204 @@ describe('repository', () => {
     })
   })
 
+  it('skips existing records by stable path across any site when only the domain changes', async () => {
+    const legacyId = createItemId(
+      'kone-pornvideo-hot',
+      'https://kone.gg/s/pornvideo/abc123',
+      'Same Post',
+    )
+
+    await db.items.put({
+      id: legacyId,
+      siteId: 'kone-pornvideo-hot',
+      title: 'Same Post',
+      url: 'https://kone.gg/s/pornvideo/abc123',
+      crawledAt: 100,
+    })
+    await db.crawledItemLogs.put({
+      id: legacyId,
+      siteId: 'kone-pornvideo-hot',
+      itemId: legacyId,
+      firstSeenAt: 100,
+      lastSeenAt: 100,
+      seenCount: 1,
+    })
+
+    const result = await upsertCrawledItems(
+      'kone-pornvideo-hot',
+      [
+        {
+          title: 'Same Post',
+          url: 'https://mirror.kone.gg/s/pornvideo/abc123',
+        },
+      ],
+      200,
+    )
+    const items = await listItemsBySite('kone-pornvideo-hot')
+    const newId = createItemId(
+      'kone-pornvideo-hot',
+      'https://mirror.kone.gg/s/pornvideo/abc123',
+      'Same Post',
+    )
+    const legacyLog = await db.crawledItemLogs.get(legacyId)
+    const newLog = await db.crawledItemLogs.get(newId)
+
+    expect(result.insertedCount).toBe(0)
+    expect(result.skippedCount).toBe(1)
+    expect(items).toHaveLength(1)
+    expect(items[0]?.id).toBe(legacyId)
+    expect(legacyLog).toMatchObject({
+      firstSeenAt: 100,
+      lastSeenAt: 100,
+      seenCount: 1,
+    })
+    expect(newLog).toMatchObject({
+      itemId: legacyId,
+      firstSeenAt: 100,
+      lastSeenAt: 200,
+      seenCount: 2,
+    })
+  })
+
+  it('skips existing records by shared twitter media id when parser output changes shape', async () => {
+    const legacyId = createItemId(
+      'xranking-ranking',
+      'https://pbs.twimg.com/ext_tw_video_thumb/333/pu/img/legacy.jpg?name=orig',
+      'Legacy Thumb',
+      'xranking:preview-id:333',
+    )
+
+    await db.items.put({
+      id: legacyId,
+      siteId: 'xranking-ranking',
+      title: 'Legacy Thumb',
+      url: 'https://pbs.twimg.com/ext_tw_video_thumb/333/pu/img/legacy.jpg?name=orig',
+      crawledAt: 100,
+    })
+
+    const result = await upsertCrawledItems(
+      'xranking-ranking',
+      [
+        {
+          title: 'New Video',
+          url: 'https://video.twimg.com/ext_tw_video/333/pu/vid/avc1/720x1280/new.mp4?tag=12',
+          dedupeKey: 'xranking:video-id:333',
+        },
+      ],
+      200,
+    )
+    const items = await listItemsBySite('xranking-ranking')
+
+    expect(result.insertedCount).toBe(0)
+    expect(result.skippedCount).toBe(1)
+    expect(items).toHaveLength(1)
+    expect(items[0]?.id).toBe(legacyId)
+  })
+
+  it('skips legacy nimi preview records when the new api reports the same video id', async () => {
+    const legacyId = createItemId(
+      'nimi-tw-ranking',
+      'https://pbs.twimg.com/amplify_video_thumb/2054119491395858432/img/Uvxu5VE_fXU5BQio.jpg?name=orig',
+      '1위 - 지윤',
+      'nimi:preview-id:2054119491395858432',
+    )
+
+    await db.items.put({
+      id: legacyId,
+      siteId: 'nimi-tw-ranking',
+      title: '1위 - 지윤',
+      url: 'https://pbs.twimg.com/amplify_video_thumb/2054119491395858432/img/Uvxu5VE_fXU5BQio.jpg?name=orig',
+      previewImageUrl:
+        'https://pbs.twimg.com/amplify_video_thumb/2054119491395858432/img/Uvxu5VE_fXU5BQio.jpg?name=orig',
+      crawledAt: 100,
+    })
+    await db.crawledItemLogs.put({
+      id: legacyId,
+      siteId: 'nimi-tw-ranking',
+      itemId: legacyId,
+      firstSeenAt: 100,
+      lastSeenAt: 150,
+      seenCount: 2,
+    })
+
+    const result = await upsertCrawledItems(
+      'nimi-tw-ranking',
+      [
+        {
+          title: '1위 - 지윤님의 동영상',
+          url: 'https://video.twimg.com/amplify_video/2054119491395858432/vid/avc1/1280x720/zkA16ktZJFwEolKg.mp4?tag=14',
+          previewImageUrl:
+            'https://pbs.twimg.com/amplify_video_thumb/2054119491395858432/img/Uvxu5VE_fXU5BQio.jpg?name=orig',
+          summary: 'https://x.com/jiyun_example/status/2054120219122725174',
+          dedupeKey: 'nimi:video-id:2054119491395858432',
+        },
+      ],
+      200,
+    )
+    const items = await listItemsBySite('nimi-tw-ranking')
+    const newId = createItemId(
+      'nimi-tw-ranking',
+      'https://video.twimg.com/amplify_video/2054119491395858432/vid/avc1/1280x720/zkA16ktZJFwEolKg.mp4?tag=14',
+      '1위 - 지윤님의 동영상',
+      'nimi:video-id:2054119491395858432',
+    )
+    const legacyLog = await db.crawledItemLogs.get(legacyId)
+    const newLog = await db.crawledItemLogs.get(newId)
+
+    expect(result.insertedCount).toBe(0)
+    expect(result.skippedCount).toBe(1)
+    expect(items).toHaveLength(1)
+    expect(items[0]?.id).toBe(legacyId)
+    expect(newLog).toBeUndefined()
+    expect(legacyLog).toMatchObject({
+      itemId: legacyId,
+      firstSeenAt: 100,
+      lastSeenAt: 200,
+      seenCount: 3,
+    })
+  })
+
+  it('does not re-insert deleted legacy nimi preview records', async () => {
+    const legacyId = createItemId(
+      'nimi-tw-ranking',
+      'https://pbs.twimg.com/ext_tw_video_thumb/2040767762675736576/pu/img/RffKoXzOQWfR9U-R.jpg?name=small',
+      '1위 - 오메숍',
+      'nimi:preview-id:2040767762675736576',
+    )
+
+    await db.crawledItemLogs.put({
+      id: legacyId,
+      siteId: 'nimi-tw-ranking',
+      itemId: legacyId,
+      firstSeenAt: 100,
+      lastSeenAt: 100,
+      seenCount: 1,
+    })
+
+    const result = await upsertCrawledItems(
+      'nimi-tw-ranking',
+      [
+        {
+          title: '1위 - 오메숍님의 동영상',
+          url: 'https://video.twimg.com/ext_tw_video/2040767762675736576/pu/vid/avc1/656x512/6EQLHr05HYGvQUEO.mp4?tag=12',
+          dedupeKey: 'nimi:video-id:2040767762675736576',
+        },
+      ],
+      200,
+    )
+    const items = await listItemsBySite('nimi-tw-ranking')
+    const legacyLog = await db.crawledItemLogs.get(legacyId)
+
+    expect(result.insertedCount).toBe(0)
+    expect(result.skippedCount).toBe(1)
+    expect(items).toHaveLength(0)
+    expect(legacyLog).toMatchObject({
+      firstSeenAt: 100,
+      lastSeenAt: 200,
+      seenCount: 2,
+    })
+  })
+
   it('skips already logged items instead of updating existing records', async () => {
     await upsertCrawledItems(
       'hacker-news',
