@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest'
 import { torrentbotTopicTop20Parser } from './torrentbot-topic-top20.parser'
 
 function loadFixture(): string {
-  const fixturePath = new URL('../../public/sample/torrentbot_example.html', import.meta.url)
+  const fixturePath = new URL(
+    '../../../public/sample/torrentbot_example.html',
+    import.meta.url,
+  )
   return readFileSync(fixturePath, 'utf-8')
 }
 

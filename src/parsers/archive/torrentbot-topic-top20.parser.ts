@@ -1,5 +1,5 @@
-import type { ParsedItem, SiteParser } from '../types/contracts'
-import { cleanText, dedupeByUrlAndTitle, toAbsoluteUrl } from './utils'
+import type { ParsedItem, SiteParser } from '../../types/contracts'
+import { cleanText, dedupeByUrlAndTitle, toAbsoluteUrl } from '../utils'
 
 const ROW_REGEX = /<ul class="td ufl">([\s\S]*?)<\/ul>/gi
 const TITLE_LINK_REGEX =

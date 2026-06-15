@@ -30,13 +30,6 @@ export const targetSites: TargetSite[] = [
     parserId: "nimi-tw-ranking",
   },
   {
-    id: "torrentbot-topic-top20",
-    name: "TorrentBot",
-    url: "https://torrentbot230.site/topic/index?top=20",
-    matchPatterns: ["https://torrentbot230.site/*"],
-    parserId: "torrentbot-topic-top20",
-  },
-  {
     id: "kone-pornvideo-hot",
     name: "Kone",
     url: "https://kone.gg/s/pornvideo?mode=hot",

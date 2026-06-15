@@ -6,7 +6,6 @@ import { konePornvideoHotParser } from './kone-pornvideo-hot.parser'
 import { missavWeeklyViewsParser } from './missav-weekly-views.parser'
 import { nimiTwRankingParser } from './nimi-tw-ranking.parser'
 import { tcafeD2001HotBestParser } from './tcafe-d2001-hot-best.parser'
-import { torrentbotTopicTop20Parser } from './torrentbot-topic-top20.parser'
 import { twidougaRankingT1Parser } from './twidouga-ranking-t1.parser'
 import { xrankingRankingParser } from './xranking-ranking.parser'
 
@@ -18,7 +17,6 @@ const parserRegistry: Record<string, SiteParser> = {
   'nimi-tw-ranking': nimiTwRankingParser,
   'tcafe-d2001-hot-best': tcafeD2001HotBestParser,
   'twidouga-ranking-t1': twidougaRankingT1Parser,
-  'torrentbot-topic-top20': torrentbotTopicTop20Parser,
   'kone-pornvideo-hot': konePornvideoHotParser,
   'xranking-ranking': xrankingRankingParser,
 }

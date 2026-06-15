@@ -12,8 +12,14 @@ const NEXT_FLIGHT_CHUNK_REGEX =
   /self\.__next_f\.push\(\[\s*1\s*,\s*(['"])((?:\\.|(?!\1)[\s\S])*)\1\s*,?\s*\]\);?/g
 const ARTICLE_ANCHOR_TAG_REGEX = /<a\b[^>]*>/gi
 const IMAGE_TAG_REGEX = /<img\b[^>]*>/gi
-const CONTEXT_IMAGE_TAG_REGEX = /<img\b[^>]*>/i
+const CONTEXT_IMAGE_TAG_REGEX = /<img\b[^>]*>/gi
+const CONTEXT_TITLE_ATTR_TAG_REGEX = /<[^>]+\btitle=(?:"([^"]*)"|'([^']*)')[^>]*>/i
 const ROW_CONTEXT_WINDOW = 4000
+
+interface ArticlePath {
+  subHandle: string
+  articleId: string
+}
 
 function decodePackedString(input: string): string {
   try {
@@ -123,6 +129,32 @@ function buildArticleUrl(pageUrl: string, subHandle: string, articleId: string):
   }
 }
 
+function getArticlePath(rawHref: string, pageUrl: string): ArticlePath | undefined {
+  try {
+    const url = new URL(decodeHtmlEntities(rawHref), pageUrl)
+    const pathnameMatch = /^\/s\/([^/?#]+)\/([^/?#]+)/.exec(url.pathname)
+
+    if (!pathnameMatch) {
+      return undefined
+    }
+
+    const subHandle = pathnameMatch[1]?.trim()
+    const articleId = pathnameMatch[2]?.trim()
+
+    if (!subHandle || !articleId || articleId.toLowerCase() === 'write') {
+      return undefined
+    }
+
+    return { subHandle, articleId }
+  } catch {
+    return undefined
+  }
+}
+
+function buildDedupeKey(articlePath: ArticlePath): string {
+  return `kone:path:/s/${articlePath.subHandle}/${articlePath.articleId}`
+}
+
 function normalizeArticleUrl(rawHref: string, pageUrl: string): string {
   try {
     const url = new URL(rawHref, pageUrl)
@@ -156,6 +188,54 @@ function getAttribute(tagHtml: string, attributeName: string): string | undefine
 
   const bareMatcher = new RegExp(`${attributeName}\\s*=\\s*([^\\s>]+)`, 'i')
   return bareMatcher.exec(tagHtml)?.[1]
+}
+
+function getAnchorContext(html: string, anchorStartIndex: number | undefined): string {
+  if (anchorStartIndex === undefined) {
+    return ''
+  }
+
+  const anchorEndIndex = html.indexOf('</a>', anchorStartIndex)
+
+  if (anchorEndIndex >= 0) {
+    return html.slice(anchorStartIndex, anchorEndIndex + '</a>'.length)
+  }
+
+  return html.slice(anchorStartIndex, anchorStartIndex + ROW_CONTEXT_WINDOW)
+}
+
+function getPreviewImageFromContext(
+  contextHtml: string,
+  pageUrl: string,
+): { alt?: string; url?: string } {
+  CONTEXT_IMAGE_TAG_REGEX.lastIndex = 0
+
+  for (const match of contextHtml.matchAll(CONTEXT_IMAGE_TAG_REGEX)) {
+    const imageTagHtml = match[0]
+    const rawPreviewUrl = getAttribute(imageTagHtml, 'src')?.trim()
+
+    if (!rawPreviewUrl || rawPreviewUrl.startsWith('data:')) {
+      continue
+    }
+
+    return {
+      alt: getAttribute(imageTagHtml, 'alt'),
+      url: toAbsoluteUrl(rawPreviewUrl, pageUrl),
+    }
+  }
+
+  return {}
+}
+
+function getTitleFromContext(
+  contextHtml: string,
+  rawTitle: string | undefined,
+  imageAlt: string | undefined,
+): string {
+  const titleAttrMatch = CONTEXT_TITLE_ATTR_TAG_REGEX.exec(contextHtml)
+  const titleAttr = titleAttrMatch?.[1] ?? titleAttrMatch?.[2]
+
+  return cleanText(decodeHtmlEntities(rawTitle ?? imageAlt ?? titleAttr ?? ''))
 }
 
 function parseFromPackedPayload(html: string, pageUrl: string): ParsedItem[] {
@@ -194,6 +274,7 @@ function parseFromPackedPayload(html: string, pageUrl: string): ParsedItem[] {
     parsed.push({
       title,
       url: buildArticleUrl(pageUrl, subHandle, articleId),
+      dedupeKey: buildDedupeKey({ subHandle, articleId }),
       previewImageUrl: toAbsoluteUrl(rawPreviewUrl, pageUrl),
     })
   }
@@ -228,43 +309,33 @@ function parseFromDomCards(html: string, pageUrl: string): ParsedItem[] {
     const rawTitle = getAttribute(anchorTagHtml, 'title')
     const rawHref = getAttribute(anchorTagHtml, 'href')
 
-    if (!rawTitle || !rawHref) {
+    if (!rawHref) {
       continue
     }
 
     const href = decodeHtmlEntities(rawHref)
-    if (!/^\/?s\/[^/?#]+\/[^/?#]+/i.test(href.replace(/^https?:\/\/[^/]+/i, ''))) {
+    const articlePath = getArticlePath(href, pageUrl)
+    if (!articlePath) {
       continue
     }
 
-    const title = cleanText(decodeHtmlEntities(rawTitle))
-    if (!title) {
-      continue
-    }
-
-    let previewImageUrl: string | undefined
-    if (match.index !== undefined) {
-      const rowContext = html.slice(match.index, match.index + ROW_CONTEXT_WINDOW)
-      const rowPreviewTag = CONTEXT_IMAGE_TAG_REGEX.exec(rowContext)?.[0]
-      const rowPreview = rowPreviewTag
-        ? getAttribute(rowPreviewTag, 'src')?.trim()
-        : undefined
-      if (rowPreview && !rowPreview.startsWith('data:')) {
-        previewImageUrl = toAbsoluteUrl(rowPreview, pageUrl)
-      }
-    }
+    const rowContext = getAnchorContext(html, match.index)
+    const rowPreview = getPreviewImageFromContext(rowContext, pageUrl)
+    const title = getTitleFromContext(rowContext, rawTitle, rowPreview.alt)
+    let previewImageUrl = rowPreview.url
 
     if (!previewImageUrl) {
       previewImageUrl = previewByTitle.get(title.toLowerCase())
     }
 
-    if (!previewImageUrl) {
+    if (!title || !previewImageUrl) {
       continue
     }
 
     parsed.push({
       title,
       url: normalizeArticleUrl(href, pageUrl),
+      dedupeKey: buildDedupeKey(articlePath),
       previewImageUrl,
     })
   }

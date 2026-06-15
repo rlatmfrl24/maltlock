@@ -157,6 +157,35 @@ describe('repository', () => {
     })
   })
 
+  it('does not collapse different query-based board posts into one stable path', async () => {
+    await upsertCrawledItems(
+      'tcafe-d2001-hot-best',
+      [
+        {
+          title: 'First Post',
+          url: 'https://tcafe21.com/bbs/board.php?bo_table=D2001&wr_id=100',
+        },
+      ],
+      100,
+    )
+
+    const result = await upsertCrawledItems(
+      'tcafe-d2001-hot-best',
+      [
+        {
+          title: 'Second Post',
+          url: 'https://tcafe21.com/bbs/board.php?bo_table=D2001&wr_id=101',
+        },
+      ],
+      200,
+    )
+    const items = await listItemsBySite('tcafe-d2001-hot-best')
+
+    expect(result.insertedCount).toBe(1)
+    expect(result.skippedCount).toBe(0)
+    expect(items).toHaveLength(2)
+  })
+
   it('skips existing records by shared twitter media id when parser output changes shape', async () => {
     const legacyId = createItemId(
       'xranking-ranking',
@@ -503,6 +532,42 @@ describe('repository', () => {
       200,
     )
     const itemsAfterRecrawl = await listItemsBySite('hacker-news')
+
+    expect(recrawlResult.insertedCount).toBe(0)
+    expect(recrawlResult.skippedCount).toBe(1)
+    expect(itemsAfterRecrawl).toHaveLength(0)
+  })
+
+  it('does not re-insert deleted items when only the source domain changes', async () => {
+    await upsertCrawledItems(
+      'torrentbot-topic-top20',
+      [
+        {
+          title: 'Same Topic',
+          url: 'https://torrentbot230.site/topic/520409',
+        },
+      ],
+      100,
+    )
+
+    const [storedItem] = await listItemsBySite('torrentbot-topic-top20')
+    if (!storedItem) {
+      throw new Error('Stored item not found')
+    }
+
+    await deleteCrawledItem(storedItem.id)
+
+    const recrawlResult = await upsertCrawledItems(
+      'torrentbot-topic-top20',
+      [
+        {
+          title: 'Same Topic',
+          url: 'https://torrentbot999.site/topic/520409',
+        },
+      ],
+      200,
+    )
+    const itemsAfterRecrawl = await listItemsBySite('torrentbot-topic-top20')
 
     expect(recrawlResult.insertedCount).toBe(0)
     expect(recrawlResult.skippedCount).toBe(1)

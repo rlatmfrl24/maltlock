@@ -1,11 +1,12 @@
 import type { ParsedItem, SiteParser } from '../types/contracts'
 import { cleanText, dedupeByUrlAndTitle, toAbsoluteUrl } from './utils'
 
-const KISSJAV_CARD_REGEX =
-  /<div class="thumb\s+thumb_rel\s+item[^"]*"[\s\S]*?<a\s+([^>]*?)>([\s\S]*?)<\/a>[\s\S]*?<\/div>/gi
+const KISSJAV_VIDEO_ANCHOR_REGEX =
+  /<a\s+([^>]*href=["'][^"']*\/video\/[^"']*["'][^>]*)>([\s\S]*?)<\/a>/gi
 
 function extractAttribute(source: string, attribute: string): string | undefined {
-  const pattern = new RegExp(`${attribute}=["']([^"']+)["']`, 'i')
+  const escapedAttribute = attribute.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const pattern = new RegExp(`(?:^|\\s)${escapedAttribute}\\s*=\\s*["']([^"']+)["']`, 'i')
   const match = pattern.exec(source)
   return match?.[1]
 }
@@ -17,18 +18,23 @@ function extractCardTitle(anchorAttributes: string, anchorInnerHtml: string): st
     return cleanText(attributeTitle)
   }
 
-  const titleMatch = /<div class="title"[^>]*>([\s\S]*?)<\/div>/i.exec(anchorInnerHtml)
+  const titleMatch =
+    /<(?:div|strong)\s+class=["'][^"']*\btitle\b[^"']*["'][^>]*>([\s\S]*?)<\/(?:div|strong)>/i.exec(
+      anchorInnerHtml,
+    )
   return cleanText(titleMatch?.[1] ?? '')
 }
 
 function extractPreviewImage(anchorInnerHtml: string, pageUrl: string): string | undefined {
-  const images = Array.from(
-    anchorInnerHtml.matchAll(/<img[^>]+(?:data-original|src)=["']([^"']+)["'][^>]*>/gi),
-  )
+  const images = Array.from(anchorInnerHtml.matchAll(/<img\b[^>]*>/gi))
 
   for (const image of images) {
-    const candidate = image[1]?.trim()
-
+    const tag = image[0] ?? ''
+    const candidate = (
+      extractAttribute(tag, 'data-original') ??
+      extractAttribute(tag, 'data-webp') ??
+      extractAttribute(tag, 'src')
+    )?.trim()
     if (!candidate || candidate.startsWith('data:')) {
       continue
     }
@@ -45,7 +51,7 @@ export const kissjavMostPopularWeekParser: SiteParser = (
 ) => {
   const parsed: ParsedItem[] = []
 
-  for (const match of html.matchAll(KISSJAV_CARD_REGEX)) {
+  for (const match of html.matchAll(KISSJAV_VIDEO_ANCHOR_REGEX)) {
     const anchorAttributes = match[1] ?? ''
     const anchorInnerHtml = match[2] ?? ''
 

@@ -21,6 +21,7 @@ interface NormalizedCrawledItem {
   item: CrawledItem
   equivalentItemIds: string[]
   stableFingerprints: string[]
+  stableFingerprintLogIds: string[]
 }
 
 function normalizeUrl(input: string): string {
@@ -67,7 +68,13 @@ function normalizeUrlPath(input: string): string | undefined {
   try {
     const parsed = new URL(input)
     const path = parsed.pathname.trim().toLowerCase()
-    return path && path !== '/' ? path : undefined
+    if (!path || path === '/') {
+      return undefined
+    }
+
+    parsed.searchParams.sort()
+    const search = parsed.searchParams.toString()
+    return search ? `${path}?${search}` : path
   } catch {
     return undefined
   }
@@ -156,6 +163,10 @@ function createStableFingerprints(
   return [...fingerprints]
 }
 
+function createStableFingerprintLogId(siteId: string, fingerprint: string): string {
+  return `${siteId}:stable:${hashString(fingerprint)}`
+}
+
 async function listExistingItemsByStableFingerprint(
   siteId: string,
   items: NormalizedCrawledItem[],
@@ -225,6 +236,45 @@ function createItemLog(item: CrawledItem): CrawledItemLog {
   }
 }
 
+function queueLog(
+  logsToWriteById: Map<string, CrawledItemLog>,
+  log: CrawledItemLog,
+): void {
+  logsToWriteById.set(log.id, log)
+}
+
+function queueStableFingerprintLogs(
+  logsToWriteById: Map<string, CrawledItemLog>,
+  existingLogById: Map<string, CrawledItemLog>,
+  item: NormalizedCrawledItem,
+  itemId: string,
+  firstSeenAt: number,
+  crawledAt: number,
+  seenCount: number,
+): void {
+  for (const stableLogId of item.stableFingerprintLogIds) {
+    const existingStableLog = existingLogById.get(stableLogId)
+
+    queueLog(
+      logsToWriteById,
+      existingStableLog
+        ? {
+            ...existingStableLog,
+            lastSeenAt: crawledAt,
+            seenCount: existingStableLog.seenCount + 1,
+          }
+        : {
+            id: stableLogId,
+            siteId: item.item.siteId,
+            itemId,
+            firstSeenAt,
+            lastSeenAt: crawledAt,
+            seenCount,
+          },
+    )
+  }
+}
+
 function getEquivalentDedupeKeys(
   _siteId: string,
   dedupeKey: string | undefined,
@@ -280,14 +330,18 @@ function normalizeParsedItem(
     rawHtmlSnippet: clipSnippet(item.rawHtmlSnippet),
     crawledAt,
   }
+  const stableFingerprints = createStableFingerprints({
+    ...normalizedItem,
+    dedupeKey: item.dedupeKey,
+  })
 
   return {
     item: normalizedItem,
     equivalentItemIds: createEquivalentItemIds(siteId, url, title, item.dedupeKey),
-    stableFingerprints: createStableFingerprints({
-      ...normalizedItem,
-      dedupeKey: item.dedupeKey,
-    }),
+    stableFingerprints,
+    stableFingerprintLogIds: stableFingerprints.map((fingerprint) =>
+      createStableFingerprintLogId(siteId, fingerprint),
+    ),
   }
 }
 
@@ -321,6 +375,13 @@ export async function upsertCrawledItems(
       : []
   const equivalentItems =
     equivalentItemIds.length > 0 ? await db.items.bulkGet(equivalentItemIds) : []
+  const stableFingerprintLogIds = Array.from(
+    new Set(dedupedNormalized.flatMap((item) => item.stableFingerprintLogIds)),
+  )
+  const stableFingerprintLogs =
+    stableFingerprintLogIds.length > 0
+      ? await db.crawledItemLogs.bulkGet(stableFingerprintLogIds)
+      : []
   const existingItemByStableFingerprint = await listExistingItemsByStableFingerprint(
     siteId,
     dedupedNormalized,
@@ -341,6 +402,11 @@ export async function upsertCrawledItems(
     }
   }
   for (const log of equivalentLogs) {
+    if (log) {
+      existingLogById.set(log.id, log)
+    }
+  }
+  for (const log of stableFingerprintLogs) {
     if (log) {
       existingLogById.set(log.id, log)
     }
@@ -366,7 +432,7 @@ export async function upsertCrawledItems(
   }
 
   const freshItems: CrawledItem[] = []
-  const logsToWrite: CrawledItemLog[] = []
+  const logsToWriteById = new Map<string, CrawledItemLog>()
 
   for (const normalizedItem of dedupedNormalized) {
     const { item } = normalizedItem
@@ -376,6 +442,11 @@ export async function upsertCrawledItems(
         .map((equivalentItemId) => existingLogById.get(equivalentItemId))
         .find((equivalentLog): equivalentLog is CrawledItemLog =>
           Boolean(equivalentLog),
+        ) ??
+      normalizedItem.stableFingerprintLogIds
+        .map((stableLogId) => existingLogById.get(stableLogId))
+        .find((stableLog): stableLog is CrawledItemLog =>
+          Boolean(stableLog),
         )
 
     if (!existingLog) {
@@ -394,35 +465,68 @@ export async function upsertCrawledItems(
 
       if (existingItem) {
         const sourceLog = existingLogById.get(existingItem.id)
+        const firstSeenAt = sourceLog?.firstSeenAt ?? existingItem.crawledAt
+        const seenCount = (sourceLog?.seenCount ?? 1) + 1
 
-        logsToWrite.push({
+        queueLog(logsToWriteById, {
           id: item.id,
           siteId: existingItem.siteId,
           itemId: existingItem.id,
-          firstSeenAt: sourceLog?.firstSeenAt ?? existingItem.crawledAt,
+          firstSeenAt,
           lastSeenAt: crawledAt,
-          seenCount: (sourceLog?.seenCount ?? 1) + 1,
+          seenCount,
         })
+        queueStableFingerprintLogs(
+          logsToWriteById,
+          existingLogById,
+          normalizedItem,
+          existingItem.id,
+          firstSeenAt,
+          crawledAt,
+          seenCount,
+        )
         continue
       }
 
       freshItems.push(item)
-      logsToWrite.push(createItemLog(item))
+      queueLog(logsToWriteById, createItemLog(item))
+      queueStableFingerprintLogs(
+        logsToWriteById,
+        existingLogById,
+        normalizedItem,
+        item.id,
+        crawledAt,
+        crawledAt,
+        1,
+      )
       continue
     }
 
-    logsToWrite.push({
+    const updatedLog = {
       ...existingLog,
       lastSeenAt: crawledAt,
       seenCount: existingLog.seenCount + 1,
-    })
+    }
+    queueLog(logsToWriteById, updatedLog)
+    queueStableFingerprintLogs(
+      logsToWriteById,
+      existingLogById,
+      normalizedItem,
+      existingLog.itemId,
+      existingLog.firstSeenAt,
+      crawledAt,
+      updatedLog.seenCount,
+    )
   }
 
   await db.transaction('rw', db.items, db.crawledItemLogs, async () => {
     if (freshItems.length > 0) {
       await db.items.bulkPut(freshItems)
     }
-    await db.crawledItemLogs.bulkPut(logsToWrite)
+    const logsToWrite = [...logsToWriteById.values()]
+    if (logsToWrite.length > 0) {
+      await db.crawledItemLogs.bulkPut(logsToWrite)
+    }
   })
 
   const insertedCount = freshItems.length

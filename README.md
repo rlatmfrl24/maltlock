@@ -20,7 +20,6 @@ React + TypeScript + Vite 기반 Chrome MV3 사이드패널 확장입니다.
 - MissAV: `https://missav123.to/ko/all?sort=weekly_views`
 - TwiDouga: `https://www.twidouga.net/ko/ranking_t1.php`
 - NimiWiki: `https://tw1.nimi.wiki/ko/ranking/week`
-- TorrentBot: `https://torrentbot230.site/topic/index?top=20`
 - Kone: `https://kone.gg/s/pornvideo?mode=hot`
 - Tcafe: `https://tcafe21.com/bbs/board.php?bo_table=D2001`
 

@@ -12,6 +12,11 @@ function loadFixture2(): string {
   return readFileSync(fixturePath, 'utf-8')
 }
 
+function loadNewFixture(): string {
+  const fixturePath = new URL('../../public/sample/kone_new.html', import.meta.url)
+  return readFileSync(fixturePath, 'utf-8')
+}
+
 describe('konePornvideoHotParser', () => {
   it('extracts preview image, url and title from kone hot listing', () => {
     const html = loadFixture()
@@ -33,6 +38,7 @@ describe('konePornvideoHotParser', () => {
     expect(hasInvalidTitle).toBe(false)
     expect(hasMissingPreview).toBe(false)
     expect(hasInvalidUrl).toBe(false)
+    expect(new Set(items.map((item) => item.dedupeKey)).size).toBe(items.length)
   })
 
   it('extracts items from kone hot listing fixture #2', () => {
@@ -55,6 +61,31 @@ describe('konePornvideoHotParser', () => {
     expect(hasInvalidTitle).toBe(false)
     expect(hasMissingPreview).toBe(false)
     expect(hasInvalidUrl).toBe(false)
+    expect(new Set(items.map((item) => item.dedupeKey)).size).toBe(items.length)
+  })
+
+  it('extracts items from the current kone hot listing structure', () => {
+    const html = loadNewFixture()
+
+    const items = konePornvideoHotParser(html, 'https://kone.gg/s/pornvideo?mode=hot')
+
+    expect(items.length).toBeGreaterThan(20)
+
+    const hasInvalidTitle = items.some((item) => !item.title.trim())
+    const hasMissingPreview = items.some((item) => !item.previewImageUrl?.startsWith('https://'))
+    const hasInvalidUrl = items.some(
+      (item) =>
+        !item.url.startsWith('https://kone.gg/s/pornvideo/') ||
+        !item.url.includes('?mode=hot') ||
+        item.url.includes('/write') ||
+        item.url.includes('?p=') ||
+        item.url.includes('&p='),
+    )
+
+    expect(hasInvalidTitle).toBe(false)
+    expect(hasMissingPreview).toBe(false)
+    expect(hasInvalidUrl).toBe(false)
+    expect(new Set(items.map((item) => item.dedupeKey)).size).toBe(items.length)
   })
 
   it('parses all articles even when packed payload is split across script chunks', () => {
@@ -75,11 +106,13 @@ describe('konePornvideoHotParser', () => {
       {
         title: 'First title',
         url: 'https://kone.gg/s/pornvideo/article-1?mode=hot',
+        dedupeKey: 'kone:path:/s/pornvideo/article-1',
         previewImageUrl: 'https://img.example.com/first.jpg',
       },
       {
         title: 'Second title',
         url: 'https://kone.gg/s/pornvideo/article-2?mode=hot',
+        dedupeKey: 'kone:path:/s/pornvideo/article-2',
         previewImageUrl: 'https://img.example.com/second.jpg',
       },
     ])
@@ -99,6 +132,7 @@ describe('konePornvideoHotParser', () => {
       {
         title: 'Third title',
         url: 'https://kone.gg/s/pornvideo/article-3?mode=hot',
+        dedupeKey: 'kone:path:/s/pornvideo/article-3',
         previewImageUrl: 'https://img.example.com/third.jpg',
       },
     ])
@@ -118,6 +152,7 @@ describe('konePornvideoHotParser', () => {
       {
         title: 'Dom title',
         url: 'https://kone.gg/s/pornvideo/dom-article?mode=hot',
+        dedupeKey: 'kone:path:/s/pornvideo/dom-article',
         previewImageUrl: 'https://img.example.com/dom.jpg',
       },
     ])
