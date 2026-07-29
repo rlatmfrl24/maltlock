@@ -5,6 +5,7 @@ import {
   dedupeByUrlAndTitle,
   toAbsoluteUrl,
 } from './utils'
+import { canonicalPathIdentity, sourceIdIdentity } from './identities'
 
 const HOT_SECTION_REGEX =
   /<div\b[^>]*class=(?:"[^"]*\bboard-hot-title\b[^"]*"|'[^']*\bboard-hot-title\b[^']*')[^>]*>([\s\S]*?)<\/div>\s*<div\b[^>]*class=(?:"[^"]*\bmiso-post-list\b[^"]*"|'[^']*\bmiso-post-list\b[^']*')[^>]*>[\s\S]*?<ul\b[^>]*class=(?:"[^"]*\bpost-list\b[^"]*"|'[^']*\bpost-list\b[^']*')[^>]*>([\s\S]*?)<\/ul>/gi
@@ -75,10 +76,17 @@ export const tcafeD2001HotBestParser: SiteParser = (html: string, pageUrl: strin
         ? `${sectionLabel} · 댓글 +${commentCount}`
         : sectionLabel
 
+      const parsedUrl = new URL(absoluteUrl)
+      const wrId = parsedUrl.searchParams.get('wr_id')
+      const canonicalIdentity = canonicalPathIdentity(absoluteUrl)
       parsed.push({
         title,
         url: absoluteUrl,
         dedupeKey: buildDedupeKey(absoluteUrl),
+        identities: [
+          ...(wrId ? [sourceIdIdentity(wrId)] : []),
+          ...(canonicalIdentity ? [canonicalIdentity] : []),
+        ],
         summary,
       })
     }

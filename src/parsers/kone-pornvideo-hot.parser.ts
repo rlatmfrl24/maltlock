@@ -1,4 +1,5 @@
 import type { ParsedItem, SiteParser } from '../types/contracts'
+import { canonicalPathIdentity, sourceIdIdentity } from './identities'
 import {
   cleanText,
   decodeHtmlEntities,
@@ -271,10 +272,16 @@ function parseFromPackedPayload(html: string, pageUrl: string): ParsedItem[] {
       continue
     }
 
+    const url = buildArticleUrl(pageUrl, subHandle, articleId)
+    const canonicalIdentity = canonicalPathIdentity(url)
     parsed.push({
       title,
-      url: buildArticleUrl(pageUrl, subHandle, articleId),
+      url,
       dedupeKey: buildDedupeKey({ subHandle, articleId }),
+      identities: [
+        sourceIdIdentity(articleId),
+        ...(canonicalIdentity ? [canonicalIdentity] : []),
+      ],
       previewImageUrl: toAbsoluteUrl(rawPreviewUrl, pageUrl),
     })
   }
@@ -332,10 +339,16 @@ function parseFromDomCards(html: string, pageUrl: string): ParsedItem[] {
       continue
     }
 
+    const url = normalizeArticleUrl(href, pageUrl)
+    const canonicalIdentity = canonicalPathIdentity(url)
     parsed.push({
       title,
-      url: normalizeArticleUrl(href, pageUrl),
+      url,
       dedupeKey: buildDedupeKey(articlePath),
+      identities: [
+        sourceIdIdentity(articlePath.articleId),
+        ...(canonicalIdentity ? [canonicalIdentity] : []),
+      ],
       previewImageUrl,
     })
   }

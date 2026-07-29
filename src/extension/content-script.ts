@@ -13,6 +13,9 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
   const response: CollectHtmlResponse = {
     html: document.documentElement.outerHTML,
     tabUrl: window.location.href,
+    documentTitle: document.title,
+    readyState: document.readyState,
+    bodyTextLength: document.body?.innerText.length ?? 0,
   }
 
   sendResponse(response)

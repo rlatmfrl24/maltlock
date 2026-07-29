@@ -1,5 +1,6 @@
 import type { ParsedItem, SiteParser } from '../types/contracts'
 import { cleanText, decodeHtmlEntities, toAbsoluteUrl } from './utils'
+import { twitterMediaIdentities } from './identities'
 
 const ARTICLE_REGEX = /<article\b[\s\S]*?<\/article>/gi
 const RANK_REGEX =
@@ -160,6 +161,7 @@ function dedupeRankedItems(items: RankedParsedItem[]): ParsedItem[] {
       title: item.title,
       url: item.url,
       dedupeKey: item.dedupeKey,
+      identities: item.identities,
       previewImageUrl: item.previewImageUrl,
       summary: item.summary,
       price: item.price,
@@ -198,6 +200,11 @@ export const xrankingRankingParser: SiteParser = (html: string, pageUrl: string)
       title: buildTitle(rankOrder, rawTitle, normalizedStatusUrl, normalizedVideoUrl),
       url: normalizedVideoUrl,
       dedupeKey: buildDedupeKey(
+        normalizedVideoUrl,
+        normalizedStatusUrl,
+        normalizedPosterUrl,
+      ),
+      identities: twitterMediaIdentities(
         normalizedVideoUrl,
         normalizedStatusUrl,
         normalizedPosterUrl,

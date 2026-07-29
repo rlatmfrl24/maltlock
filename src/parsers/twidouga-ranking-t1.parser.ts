@@ -1,5 +1,6 @@
 import type { ParsedItem, SiteParser } from '../types/contracts'
-import { toAbsoluteUrl } from './utils'
+import { decodeHtmlEntities, toAbsoluteUrl } from './utils'
+import { twitterMediaIdentities } from './identities'
 
 const VIDEO_URL_ANCHOR_REGEX =
   /<a\s+[^>]*href=["'](https?:\/\/video\.twimg\.com\/[^"']+)["'][^>]*>\s*(?:동영상\s*URL|동영상URL|動画\s*URL|動画URL|Video\s*URL|VideoURL)\s*<\/a\s*>/gi
@@ -10,10 +11,17 @@ const PREVIEW_IMAGE_REGEX =
 const VIDEO_ID_REGEX = /\/(?:amplify_video|ext_tw_video)\/(\d+)\//i
 const PREVIEW_IMAGE_ID_REGEX = /\/(?:amplify_video_thumb|ext_tw_video_thumb)\/(\d+)\//i
 const TWEET_STATUS_ID_REGEX = /\/status\/(\d+)/i
+const HTML_TAG_REGEX = /<(?:div|article)\b[^>]*>/gi
+const HTML_ATTRIBUTE_REGEX = /([^\s=/>]+)\s*=\s*(["'])([\s\S]*?)\2/g
 
 interface RankMarker {
   index: number
   rank: number
+}
+
+interface RankItemTag {
+  index: number
+  attributes: Map<string, string>
 }
 
 interface RankedParsedItem extends ParsedItem {
@@ -52,6 +60,43 @@ function extractRankMarkers(source: string): RankMarker[] {
   return markers
 }
 
+function parseHtmlAttributes(tagHtml: string): Map<string, string> {
+  const attributes = new Map<string, string>()
+
+  for (const match of tagHtml.matchAll(HTML_ATTRIBUTE_REGEX)) {
+    const name = match[1]?.toLowerCase()
+    const value = match[3]
+    if (name && value !== undefined) {
+      attributes.set(name, decodeHtmlEntities(value))
+    }
+  }
+
+  return attributes
+}
+
+function extractRankItemTags(source: string): RankItemTag[] {
+  const tags: RankItemTag[] = []
+
+  for (const match of source.matchAll(HTML_TAG_REGEX)) {
+    if (match.index === undefined) {
+      continue
+    }
+
+    const attributes = parseHtmlAttributes(match[0])
+    const classNames = attributes.get('class')?.split(/\s+/) ?? []
+    if (!classNames.includes('rank-item')) {
+      continue
+    }
+
+    tags.push({
+      index: match.index,
+      attributes,
+    })
+  }
+
+  return tags
+}
+
 function buildTitle(rank: string, tweetUrl: string | undefined, videoUrl: string): string {
   if (tweetUrl) {
     return `${rank}위 - ${tweetUrl}`
@@ -76,6 +121,34 @@ function normalizeTweetUrl(tweetUrl: string | undefined): string | undefined {
   }
 
   return `https://x.com/i/status/${statusId}`
+}
+
+function isHttpUrlForHost(input: string, hostname: string): boolean {
+  try {
+    const parsed = new URL(input)
+    return (
+      (parsed.protocol === 'https:' || parsed.protocol === 'http:') &&
+      parsed.hostname.toLowerCase() === hostname
+    )
+  } catch {
+    return false
+  }
+}
+
+function isTweetUrl(input: string): boolean {
+  try {
+    const parsed = new URL(input)
+    const hostname = parsed.hostname.toLowerCase()
+    return (
+      (parsed.protocol === 'https:' || parsed.protocol === 'http:') &&
+      (hostname === 'x.com' ||
+        hostname === 'www.x.com' ||
+        hostname === 'twitter.com' ||
+        hostname === 'www.twitter.com')
+    )
+  } catch {
+    return false
+  }
 }
 
 function normalizeUrlWithoutQuery(input: string): string {
@@ -152,6 +225,7 @@ function dedupeRankedItems(items: RankedParsedItem[]): ParsedItem[] {
       title: item.title,
       url: item.url,
       dedupeKey: item.dedupeKey,
+      identities: item.identities,
       previewImageUrl: item.previewImageUrl,
       summary: item.summary,
       price: item.price,
@@ -159,8 +233,74 @@ function dedupeRankedItems(items: RankedParsedItem[]): ParsedItem[] {
     }))
 }
 
+function parseRankItemDataAttributes(
+  html: string,
+  pageUrl: string,
+): RankedParsedItem[] {
+  const rankItemTags = extractRankItemTags(html)
+  const parsed: RankedParsedItem[] = []
+
+  for (let index = 0; index < rankItemTags.length; index += 1) {
+    const rankItem = rankItemTags[index]
+    const rawVideoUrl = rankItem.attributes.get('data-video')?.trim()
+    if (!rawVideoUrl) {
+      continue
+    }
+
+    const videoUrl = toAbsoluteUrl(rawVideoUrl, pageUrl)
+    if (!isHttpUrlForHost(videoUrl, 'video.twimg.com')) {
+      continue
+    }
+
+    const rawPreviewImageUrl = rankItem.attributes.get('data-image')?.trim()
+    const resolvedPreviewImageUrl = rawPreviewImageUrl
+      ? toAbsoluteUrl(rawPreviewImageUrl, pageUrl)
+      : undefined
+    const previewImageUrl =
+      resolvedPreviewImageUrl &&
+      isHttpUrlForHost(resolvedPreviewImageUrl, 'pbs.twimg.com')
+        ? resolvedPreviewImageUrl
+        : undefined
+
+    const rawTweetUrl = rankItem.attributes.get('data-url')?.trim()
+    const resolvedTweetUrl = rawTweetUrl
+      ? toAbsoluteUrl(rawTweetUrl, pageUrl)
+      : undefined
+    const tweetUrl =
+      resolvedTweetUrl && isTweetUrl(resolvedTweetUrl)
+        ? normalizeTweetUrl(resolvedTweetUrl)
+        : undefined
+
+    const nextRankItem = rankItemTags[index + 1]
+    const context = html.slice(
+      rankItem.index,
+      nextRankItem?.index ?? html.length,
+    )
+    const rank =
+      context.match(/(\d+)\s*위/i)?.[1] ?? `${parsed.length + 1}`
+    const rankOrder = Number.parseInt(rank, 10) || parsed.length + 1
+
+    parsed.push({
+      title: buildTitle(rank, tweetUrl, videoUrl),
+      url: videoUrl,
+      dedupeKey: buildDedupeKey(videoUrl, tweetUrl, previewImageUrl),
+      identities: twitterMediaIdentities(videoUrl, tweetUrl, previewImageUrl),
+      previewImageUrl,
+      summary: tweetUrl,
+      rankOrder,
+    })
+  }
+
+  return parsed
+}
+
 export const twidougaRankingT1Parser: SiteParser = (html: string, pageUrl: string) => {
   const normalizedHtml = html.replace(/\r\n/g, '\n')
+  const dataAttributeItems = parseRankItemDataAttributes(normalizedHtml, pageUrl)
+  if (dataAttributeItems.length > 0) {
+    return dedupeRankedItems(dataAttributeItems)
+  }
+
   const rankMarkers = extractRankMarkers(normalizedHtml)
   const parsed: RankedParsedItem[] = []
 
@@ -203,6 +343,11 @@ export const twidougaRankingT1Parser: SiteParser = (html: string, pageUrl: strin
       title: buildTitle(rank, tweetUrl, absoluteVideoUrl),
       url: absoluteVideoUrl,
       dedupeKey: buildDedupeKey(absoluteVideoUrl, tweetUrl, absolutePreviewImageUrl),
+      identities: twitterMediaIdentities(
+        absoluteVideoUrl,
+        tweetUrl,
+        absolutePreviewImageUrl,
+      ),
       previewImageUrl: absolutePreviewImageUrl,
       summary: tweetUrl,
       rankOrder: Number.parseInt(rank, 10) || entryIndex,

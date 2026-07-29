@@ -8,7 +8,9 @@ React + TypeScript + Vite 기반 Chrome MV3 사이드패널 확장입니다.
 - 활성 탭 HTML 수집 후 사이트별 파서 실행 (`CRAWL_ACTIVE_TAB`)
 - 파싱 결과를 로컬 IndexedDB(Dexie)에 저장
 - 기존 수집 로그 기반 중복 저장 방지 (아이템 ID별 `seen` 로그 유지)
-- 사이트별 최근 실행 기록(`success`/`partial`/`failed`) 표시
+- 사이트별 최근 10회 실행 기록과 파서 연속 실패 상태 표시
+- fixture 기반 활성 파서 헬스체크 및 CI 검증
+- 파서 실패 진단 JSON 내보내기와 선택적 원본 로컬 보관
 - 저장 아이템 단건 삭제
 - 사생활 모드
   - 리스트 썸네일 숨김
@@ -17,7 +19,7 @@ React + TypeScript + Vite 기반 Chrome MV3 사이드패널 확장입니다.
 
 ## 지원 사이트 (현재 UI 노출 기준)
 - KissJAV: `https://kissjav.com/most-popular/?sort_by=video_viewed_week`
-- MissAV: `https://missav123.to/ko/all?sort=weekly_views`
+- 123AV: `https://123av.com/ko/all?sort=week`
 - TwiDouga: `https://www.twidouga.net/ko/ranking_t1.php`
 - NimiWiki: `https://tw1.nimi.wiki/ko/ranking/week`
 - Kone: `https://kone.gg/s/pornvideo?mode=hot`
@@ -29,12 +31,18 @@ React + TypeScript + Vite 기반 Chrome MV3 사이드패널 확장입니다.
 - 인덱스: `id`, `siteId`, `crawledAt`, `[siteId+crawledAt]`
 
 ### `crawlRuns`
-- `runId`, `siteId`, `startedAt`, `finishedAt`, `status`, `itemCount`, `errorCode`
+- `runId`, `siteId`, `startedAt`, `finishedAt`, `status`, `errorCode`
+- 파싱/저장 지표: `parsedCount`, `validCount`, `insertedCount`, `duplicateCount`, `rejectedCount`
+- 진단 정보: `stage`, `inputSource`, `inputBytes`, `inputHash`, `durationMs`, `warnings`
 - 인덱스: `runId`, `siteId`, `startedAt`, `finishedAt`, `status`, `[siteId+startedAt]`
 
 ### `crawledItemLogs`
 - `id(itemId)`, `siteId`, `itemId`, `firstSeenAt`, `lastSeenAt`, `seenCount`
 - 인덱스: `id`, `siteId`, `itemId`, `firstSeenAt`, `lastSeenAt`, `seenCount`, `[siteId+lastSeenAt]`
+
+### `crawlDiagnostics`
+- 파서 실패 시 사용자가 원본 보관을 켠 경우에만 gzip 입력을 저장
+- 사이트별 최근 3건, 최대 7일, 원본 2MiB 이하로 제한
 
 ## 기술 스택
 - React 19
@@ -56,6 +64,8 @@ pnpm build
 pnpm lint
 pnpm test
 pnpm test:watch
+pnpm test:parsers
+pnpm check
 pnpm test:e2e
 pnpm test:e2e:headed
 ```
@@ -83,7 +93,7 @@ src/
   parsers/      # 사이트별 HTML 파서
   sidepanel/    # 실제 UI 엔트리 (sidepanel.html)
 e2e/            # Playwright 확장 스모크 테스트
-public/sample/  # 파서 개발용 샘플 HTML
+src/test/fixtures/parsers/  # 파서 테스트용 HTML/JSON fixture
 ```
 
 ## 문서

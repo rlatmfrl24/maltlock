@@ -15,18 +15,22 @@
 1. Side Panel에서 사이트 선택
 2. `OPEN_TARGET_SITE` 메시지로 탭 오픈
 3. `CRAWL_ACTIVE_TAB` 메시지로 활성 탭 크롤 시작
-4. HTML 수집 -> 파서 실행 -> 아이템 ID 생성(`URL + titleHash`) + 기존 수집 로그 확인
-5. 신규 아이템만 Dexie 저장, 전체 아이템은 로그(`seenCount`) 갱신
+4. HTML/API 입력 수집 -> 입력 지문 기록 -> 파서 실행 -> 정규화/중복 분류
+5. 신규 아이템만 Dexie 저장, 전체 유효 아이템은 로그(`seenCount`) 갱신
+6. 단계별 파싱/유효/신규/중복/탈락 지표를 `crawlRuns`에 저장
 
 ## 오류 코드 정책
 - `TAB_NOT_FOUND`
 - `TAB_URL_MISMATCH`
 - `CONTENT_SCRIPT_UNAVAILABLE`
 - `PARSE_FAILED`
-- `NO_ITEMS`
+- `PARSE_EMPTY`
+- `NORMALIZATION_EMPTY`
+- `NO_ITEMS`는 과거 실행 기록 표시 호환용으로만 유지
 
 ## 테스트 전략
-- 유닛 테스트: 파서, 중복 키, 저장소 업서트
+- 유닛 테스트: 파서 계약, 중복 키, 저장소 업서트, 실행 결과 판정, 진단 보존
+- CI: push/PR마다 `pnpm check` 실행
 - 수동 QA: 사이트 오픈/크롤/저장/탭 전환/오류 시나리오
 
 ## 수동 QA 체크리스트

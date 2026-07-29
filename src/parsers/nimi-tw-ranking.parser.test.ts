@@ -3,12 +3,12 @@ import { describe, expect, it } from 'vitest'
 import { nimiTwRankingParser } from './nimi-tw-ranking.parser'
 
 function loadApiFixture(): string {
-  const fixturePath = new URL('../../public/sample/nimi_ranking_example.json', import.meta.url)
+  const fixturePath = new URL('../test/fixtures/parsers/nimi_ranking_example.json', import.meta.url)
   return readFileSync(fixturePath, 'utf-8')
 }
 
 function loadHtmlFixture(): string {
-  const fixturePath = new URL('../../public/sample/nimi_example.html', import.meta.url)
+  const fixturePath = new URL('../test/fixtures/parsers/nimi_example.html', import.meta.url)
   return readFileSync(fixturePath, 'utf-8')
 }
 

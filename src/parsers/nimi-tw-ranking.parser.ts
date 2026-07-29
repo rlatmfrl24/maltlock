@@ -1,5 +1,6 @@
 import type { ParsedItem, SiteParser } from '../types/contracts'
 import { cleanText, decodeHtmlEntities, toAbsoluteUrl } from './utils'
+import { twitterMediaIdentities } from './identities'
 
 const VIDEO_SRC_REGEX = /https?:\/\/video\.twimg\.com\/[^"'\\s<]+/i
 const STATUS_URL_REGEX =
@@ -166,6 +167,7 @@ function dedupeRankedItems(items: RankedParsedItem[]): ParsedItem[] {
       title: item.title,
       url: item.url,
       dedupeKey: item.dedupeKey,
+      identities: item.identities,
       previewImageUrl: item.previewImageUrl,
       summary: item.summary,
       price: item.price,
@@ -307,6 +309,14 @@ function parseApiPayload(input: string, pageUrl: string): ParsedItem[] | undefin
         normalizedPreviewImageUrl,
         explicitVideoId,
       ),
+      identities: twitterMediaIdentities(
+        normalizedVideoUrl,
+        normalizedStatusUrl,
+        normalizedPreviewImageUrl,
+        explicitVideoId
+          ? `https://video.twimg.com/amplify_video/${explicitVideoId}/`
+          : undefined,
+      ),
       previewImageUrl: normalizedPreviewImageUrl,
       summary: normalizedStatusUrl,
       rawHtmlSnippet: formatViewSnippet(video.play_count),
@@ -408,6 +418,11 @@ function parseHtmlFallback(input: string, pageUrl: string): ParsedItem[] {
       ),
       url: normalizedVideoUrl,
       dedupeKey: buildDedupeKey(
+        normalizedVideoUrl,
+        normalizedStatusUrl,
+        absolutePreviewImageUrl,
+      ),
+      identities: twitterMediaIdentities(
         normalizedVideoUrl,
         normalizedStatusUrl,
         absolutePreviewImageUrl,

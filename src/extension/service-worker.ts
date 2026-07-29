@@ -1,5 +1,9 @@
 import { getTargetSiteById, siteMatchesUrl } from '../config/targets'
-import { saveCrawlRun, upsertCrawledItems } from '../db/repository'
+import {
+  saveCrawlDiagnostic,
+  saveCrawlRun,
+  upsertCrawledItems,
+} from '../db/repository'
 import { buildNimiApiUrl } from './nimi'
 import { parseByParserId } from '../parsers'
 import type {
@@ -7,8 +11,10 @@ import type {
   CollectHtmlResponse,
   CrawlActiveTabMessage,
   CrawlErrorCode,
+  CrawlInputSource,
   CrawlRun,
   CrawlSummary,
+  CrawlWarningCode,
   OpenItemLinkMessage,
   OpenItemLinkResult,
   OpenTargetSiteMessage,
@@ -17,6 +23,19 @@ import type {
   RuntimeRequestMessage,
   RuntimeResponse,
 } from '../types/contracts'
+import {
+  classifyCrawlOutcome,
+  clipErrorDetail,
+  isParserFailureRun,
+  setCrawlStage,
+} from './crawl-diagnostics'
+import {
+  createDiagnosticArtifact,
+  createInputHash,
+  DIAGNOSTIC_RETENTION_MS,
+  getInputByteLength,
+  MAX_DIAGNOSTICS_PER_SITE,
+} from './diagnostic-artifacts'
 
 const PRIVACY_BLUR_STYLE_ID = 'maltlock-privacy-screen-blur-style'
 let privacyScreenBlurEnabled = false
@@ -106,19 +125,33 @@ async function fetchNimiApiPayload(
   return payload
 }
 
+interface ResolvedParserInput {
+  content: string
+  source: CrawlInputSource
+  warnings: CrawlWarningCode[]
+}
+
 async function resolveParserInput(
   parserId: string,
   collected: CollectHtmlResponse,
-): Promise<string> {
+): Promise<ResolvedParserInput> {
   if (parserId !== 'nimi-tw-ranking') {
-    return collected.html
+    return {
+      content: collected.html,
+      source: 'dom-html',
+      warnings: [],
+    }
   }
 
   try {
     const nimiApiPayload = await fetchNimiApiPayload(collected)
 
     if (nimiApiPayload) {
-      return nimiApiPayload
+      return {
+        content: nimiApiPayload,
+        source: 'api-json',
+        warnings: [],
+      }
     }
   } catch (error) {
     if (import.meta.env.DEV) {
@@ -129,7 +162,11 @@ async function resolveParserInput(
     }
   }
 
-  return collected.html
+  return {
+    content: collected.html,
+    source: 'fallback-html',
+    warnings: ['API_FALLBACK_USED'],
+  }
 }
 
 async function ensureSidePanelBehavior(): Promise<void> {
@@ -286,6 +323,9 @@ async function collectHtmlFromTab(tabId: number): Promise<CollectHtmlResponse> {
     func: () => ({
       html: document.documentElement.outerHTML,
       tabUrl: window.location.href,
+      documentTitle: document.title,
+      readyState: document.readyState,
+      bodyTextLength: document.body?.innerText.length ?? 0,
     }),
   })
 
@@ -301,6 +341,9 @@ async function collectHtmlFromTab(tabId: number): Promise<CollectHtmlResponse> {
   return {
     html: result.html,
     tabUrl: result.tabUrl,
+    documentTitle: result.documentTitle,
+    readyState: result.readyState,
+    bodyTextLength: result.bodyTextLength,
   }
 }
 
@@ -317,9 +360,10 @@ async function crawlActiveTab(
     startedAt,
     finishedAt: startedAt,
     status: 'failed',
-    itemCount: 0,
     errorCode: undefined,
+    stage: 'validate',
   }
+  let parserInput: ResolvedParserInput | undefined
 
   try {
     const site = getTargetSiteById(siteId)
@@ -328,6 +372,8 @@ async function crawlActiveTab(
     if (!site) {
       throw new CrawlFailure('INVALID_REQUEST', '알 수 없는 사이트 ID입니다.')
     }
+
+    crawlRun.parserId = site.parserId
 
     if (message.payload.targetUrl && !targetUrl) {
       throw new CrawlFailure('INVALID_REQUEST', '사이트 URL 형식이 올바르지 않습니다.')
@@ -343,21 +389,34 @@ async function crawlActiveTab(
       )
     }
 
+    setCrawlStage(crawlRun, 'collect')
     const collected = await collectHtmlFromTab(activeTab.id)
-    const parserInput = await resolveParserInput(site.parserId, collected)
+    crawlRun.tabUrl = collected.tabUrl
+    crawlRun.documentTitle = collected.documentTitle
+    crawlRun.readyState = collected.readyState
+    crawlRun.bodyTextLength = collected.bodyTextLength
+
+    setCrawlStage(crawlRun, 'resolve-input')
+    parserInput = await resolveParserInput(site.parserId, collected)
+    crawlRun.inputSource = parserInput.source
+    crawlRun.inputBytes = getInputByteLength(parserInput.content)
+    crawlRun.inputHash = await createInputHash(parserInput.content)
+    crawlRun.warnings = [...parserInput.warnings]
 
     let parsedItems
+    setCrawlStage(crawlRun, 'parse')
     try {
-      parsedItems = parseByParserId(site.parserId, parserInput, collected.tabUrl)
+      parsedItems = parseByParserId(site.parserId, parserInput.content, collected.tabUrl)
       if (import.meta.env.DEV) {
         console.info('[maltlock] parse result', {
           parserId: site.parserId,
           tabUrl: collected.tabUrl,
           parsedCount: parsedItems.length,
-          htmlLength: parserInput.length,
+          htmlLength: parserInput.content.length,
         })
       }
     } catch (error) {
+      crawlRun.parsedCount = 0
       throw new CrawlFailure(
         'PARSE_FAILED',
         'HTML 파싱 중 오류가 발생했습니다.',
@@ -365,13 +424,56 @@ async function crawlActiveTab(
       )
     }
 
+    crawlRun.parsedCount = parsedItems.length
+    if (parsedItems.length === 0) {
+      crawlRun.validCount = 0
+      crawlRun.insertedCount = 0
+      crawlRun.duplicateCount = 0
+      crawlRun.rejectedCount = 0
+      const outcome = classifyCrawlOutcome({
+        parsedCount: 0,
+        validCount: 0,
+        rejectedCount: 0,
+      })
+      crawlRun.status = outcome.status
+      crawlRun.errorCode = outcome.errorCode
+      throw new CrawlFailure(
+        'PARSE_EMPTY',
+        '파서가 수집 가능한 아이템을 찾지 못했습니다.',
+      )
+    }
+
+    setCrawlStage(crawlRun, 'persist')
     const upserted = await upsertCrawledItems(site.id, parsedItems, Date.now())
+    crawlRun.validCount = upserted.validCount
+    crawlRun.insertedCount = upserted.insertedCount
+    crawlRun.duplicateCount = upserted.duplicateCount
+    crawlRun.exactDuplicateCount = upserted.exactDuplicateCount
+    crawlRun.similarGroupedCount = upserted.similarGroupedCount
+    crawlRun.uniqueInsertedCount = upserted.uniqueInsertedCount
+    crawlRun.rejectedCount = upserted.rejectedCount
 
-    const status = upserted.insertedCount === 0 ? 'partial' : 'success'
+    setCrawlStage(crawlRun, 'normalize')
+    const outcome = classifyCrawlOutcome({
+      parsedCount: parsedItems.length,
+      validCount: upserted.validCount,
+      rejectedCount: upserted.rejectedCount,
+    })
+    crawlRun.status = outcome.status
+    crawlRun.errorCode = outcome.errorCode
 
-    crawlRun.status = status
-    crawlRun.itemCount = upserted.insertedCount
-    crawlRun.errorCode = upserted.insertedCount === 0 ? 'NO_ITEMS' : undefined
+    if (outcome.errorCode === 'NORMALIZATION_EMPTY') {
+      throw new CrawlFailure(
+        'NORMALIZATION_EMPTY',
+        '파싱 결과가 모두 유효성 검사에서 제외되었습니다.',
+      )
+    }
+
+    if (outcome.status === 'failed') {
+      throw new CrawlFailure('UNKNOWN', '크롤 실행 결과를 분류하지 못했습니다.')
+    }
+
+    setCrawlStage(crawlRun, 'persist')
 
     return {
       ok: true,
@@ -380,9 +482,14 @@ async function crawlActiveTab(
         tabId: activeTab.id,
         tabUrl: collected.tabUrl,
         parsedCount: parsedItems.length,
-        storedCount: upserted.insertedCount,
-        skippedCount: upserted.skippedCount,
-        status,
+        validCount: upserted.validCount,
+        insertedCount: upserted.insertedCount,
+        duplicateCount: upserted.duplicateCount,
+        exactDuplicateCount: upserted.exactDuplicateCount,
+        similarGroupedCount: upserted.similarGroupedCount,
+        uniqueInsertedCount: upserted.uniqueInsertedCount,
+        rejectedCount: upserted.rejectedCount,
+        status: outcome.status,
         runId,
       },
     }
@@ -390,10 +497,45 @@ async function crawlActiveTab(
     const failure = toCrawlFailure(error)
     crawlRun.status = 'failed'
     crawlRun.errorCode = failure.code
+    crawlRun.errorDetail = clipErrorDetail(failure.detail ?? failure.message)
 
     return errorResponse(failure)
   } finally {
     crawlRun.finishedAt = Date.now()
+    crawlRun.durationMs = crawlRun.finishedAt - crawlRun.startedAt
+
+    if (
+      message.payload.captureFailurePayload &&
+      parserInput &&
+      crawlRun.inputSource &&
+      isParserFailureRun(crawlRun)
+    ) {
+      try {
+        const diagnostic = await createDiagnosticArtifact({
+          runId,
+          siteId,
+          createdAt: crawlRun.finishedAt,
+          inputSource: crawlRun.inputSource,
+          content: parserInput.content,
+        })
+
+        if (diagnostic.warning) {
+          crawlRun.warnings = Array.from(
+            new Set([...(crawlRun.warnings ?? []), diagnostic.warning]),
+          )
+        }
+
+        if (diagnostic.artifact) {
+          await saveCrawlDiagnostic(diagnostic.artifact, {
+            maxPerSite: MAX_DIAGNOSTICS_PER_SITE,
+            maxAgeMs: DIAGNOSTIC_RETENTION_MS,
+          })
+        }
+      } catch (error) {
+        console.error('[maltlock] failed to save crawl diagnostic', error)
+      }
+    }
+
     await saveCrawlRun(crawlRun)
   }
 }

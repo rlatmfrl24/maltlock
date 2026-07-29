@@ -10,9 +10,9 @@ export const targetSites: TargetSite[] = [
   },
   {
     id: "missav-weekly-views",
-    name: "MissAV",
-    url: "https://missav123.to/ko/all?sort=weekly_views",
-    matchPatterns: ["https://missav123.to/*"],
+    name: "123AV",
+    url: "https://123av.com/ko/all?sort=week",
+    matchPatterns: ["https://123av.com/*"],
     parserId: "missav-weekly-views",
   },
   {

@@ -3,8 +3,14 @@ import {
   clearAllData,
   createItemId,
   deleteCrawledItem,
+  excludeItemFromSimilarityGroup,
+  getItemBackfillProgress,
+  listItemGroupsBySite,
+  getCrawlDiagnostic,
   listItemCountsBySite,
   listItemsBySite,
+  saveCrawlDiagnostic,
+  runItemSignatureBackfillBatch,
   upsertCrawledItems,
 } from './repository'
 import { db } from './schema'
@@ -87,7 +93,7 @@ describe('repository', () => {
     const pathLog = await db.crawledItemLogs.get(pathId)
 
     expect(result.insertedCount).toBe(0)
-    expect(result.skippedCount).toBe(1)
+    expect(result.duplicateCount).toBe(1)
     expect(items).toHaveLength(1)
     expect(items[0]?.id).toBe(legacyId)
     expect(pathLog).toMatchObject({
@@ -141,7 +147,7 @@ describe('repository', () => {
     const newLog = await db.crawledItemLogs.get(newId)
 
     expect(result.insertedCount).toBe(0)
-    expect(result.skippedCount).toBe(1)
+    expect(result.duplicateCount).toBe(1)
     expect(items).toHaveLength(1)
     expect(items[0]?.id).toBe(legacyId)
     expect(legacyLog).toMatchObject({
@@ -182,7 +188,7 @@ describe('repository', () => {
     const items = await listItemsBySite('tcafe-d2001-hot-best')
 
     expect(result.insertedCount).toBe(1)
-    expect(result.skippedCount).toBe(0)
+    expect(result.duplicateCount).toBe(0)
     expect(items).toHaveLength(2)
   })
 
@@ -216,7 +222,7 @@ describe('repository', () => {
     const items = await listItemsBySite('xranking-ranking')
 
     expect(result.insertedCount).toBe(0)
-    expect(result.skippedCount).toBe(1)
+    expect(result.duplicateCount).toBe(1)
     expect(items).toHaveLength(1)
     expect(items[0]?.id).toBe(legacyId)
   })
@@ -272,7 +278,7 @@ describe('repository', () => {
     const newLog = await db.crawledItemLogs.get(newId)
 
     expect(result.insertedCount).toBe(0)
-    expect(result.skippedCount).toBe(1)
+    expect(result.duplicateCount).toBe(1)
     expect(items).toHaveLength(1)
     expect(items[0]?.id).toBe(legacyId)
     expect(newLog).toBeUndefined()
@@ -316,7 +322,7 @@ describe('repository', () => {
     const legacyLog = await db.crawledItemLogs.get(legacyId)
 
     expect(result.insertedCount).toBe(0)
-    expect(result.skippedCount).toBe(1)
+    expect(result.duplicateCount).toBe(1)
     expect(items).toHaveLength(0)
     expect(legacyLog).toMatchObject({
       firstSeenAt: 100,
@@ -325,7 +331,7 @@ describe('repository', () => {
     })
   })
 
-  it('skips already logged items instead of updating existing records', async () => {
+  it('refreshes thumbnail URLs without replacing existing item metadata', async () => {
     await upsertCrawledItems(
       'hacker-news',
       [
@@ -357,11 +363,11 @@ describe('repository', () => {
 
     expect(items).toHaveLength(1)
     expect(result.insertedCount).toBe(0)
-    expect(result.skippedCount).toBe(1)
+    expect(result.duplicateCount).toBe(1)
     expect(items[0]).toMatchObject({
       title: 'Item 1',
       summary: 'first',
-      previewImageUrl: 'https://images.example.com/first.jpg',
+      previewImageUrl: 'https://images.example.com/second.jpg',
       crawledAt: 100,
     })
     expect(log).toMatchObject({
@@ -393,9 +399,35 @@ describe('repository', () => {
 
     expect(result.items).toHaveLength(1)
     expect(result.insertedCount).toBe(1)
-    expect(result.skippedCount).toBe(0)
+    expect(result.duplicateCount).toBe(1)
     expect(items).toHaveLength(1)
     expect(items[0]?.summary).toBe('second')
+  })
+
+  it('keeps the latest thumbnail for identity duplicates in one batch', async () => {
+    const identity = {
+      kind: 'source-id' as const,
+      value: 'shared-post',
+      scope: 'site' as const,
+    }
+    const result = await upsertCrawledItems('site-a', [
+      {
+        title: 'First shape',
+        url: 'https://example.com/old',
+        previewImageUrl: 'https://images.example.com/old.jpg',
+        identities: [identity],
+      },
+      {
+        title: 'Second shape',
+        url: 'https://example.com/new',
+        previewImageUrl: 'https://images.example.com/new.jpg',
+        identities: [identity],
+      },
+    ])
+    const items = await listItemsBySite('site-a')
+
+    expect(result).toMatchObject({ insertedCount: 1, exactDuplicateCount: 1 })
+    expect(items[0]?.previewImageUrl).toBe('https://images.example.com/new.jpg')
   })
 
   it('counts inserted and skipped items separately when records already exist', async () => {
@@ -416,7 +448,7 @@ describe('repository', () => {
 
     expect(result.items).toHaveLength(1)
     expect(result.insertedCount).toBe(1)
-    expect(result.skippedCount).toBe(1)
+    expect(result.duplicateCount).toBe(1)
   })
 
   it('treats pre-existing items as already seen even when log is missing', async () => {
@@ -441,7 +473,7 @@ describe('repository', () => {
     const log = await db.crawledItemLogs.get(existingId)
 
     expect(result.insertedCount).toBe(0)
-    expect(result.skippedCount).toBe(1)
+    expect(result.duplicateCount).toBe(1)
     expect(log).toMatchObject({
       firstSeenAt: 50,
       lastSeenAt: 100,
@@ -534,7 +566,7 @@ describe('repository', () => {
     const itemsAfterRecrawl = await listItemsBySite('hacker-news')
 
     expect(recrawlResult.insertedCount).toBe(0)
-    expect(recrawlResult.skippedCount).toBe(1)
+    expect(recrawlResult.duplicateCount).toBe(1)
     expect(itemsAfterRecrawl).toHaveLength(0)
   })
 
@@ -570,7 +602,164 @@ describe('repository', () => {
     const itemsAfterRecrawl = await listItemsBySite('torrentbot-topic-top20')
 
     expect(recrawlResult.insertedCount).toBe(0)
-    expect(recrawlResult.skippedCount).toBe(1)
+    expect(recrawlResult.duplicateCount).toBe(1)
     expect(itemsAfterRecrawl).toHaveLength(0)
+  })
+
+  it('reports valid, duplicate, and rejected input counts separately', async () => {
+    const result = await upsertCrawledItems('hacker-news', [
+      { title: 'Valid', url: 'https://example.com/valid' },
+      { title: 'Valid', url: 'https://example.com/valid' },
+      { title: '   ', url: 'https://example.com/rejected' },
+      { title: 'Invalid URL', url: 'not-a-url' },
+    ])
+
+    expect(result).toMatchObject({
+      validCount: 2,
+      insertedCount: 1,
+      duplicateCount: 1,
+      rejectedCount: 2,
+    })
+  })
+
+  it('skips same-site exact identities even when URLs differ', async () => {
+    const identity = { kind: 'source-id' as const, value: 'post-100', scope: 'site' as const }
+    await upsertCrawledItems('site-a', [
+      { title: 'Original title', url: 'https://example.com/old', identities: [identity] },
+    ])
+    const result = await upsertCrawledItems('site-a', [
+      { title: 'Changed title', url: 'https://example.com/new', identities: [identity] },
+    ])
+    expect(result).toMatchObject({ insertedCount: 0, exactDuplicateCount: 1 })
+  })
+
+  it('stores cross-site global identities and puts them in one group', async () => {
+    const identity = { kind: 'media-id' as const, value: 'video:555', scope: 'global' as const }
+    await upsertCrawledItems('site-a', [
+      { title: 'Source A title', url: 'https://a.example/555', identities: [identity] },
+    ], 100)
+    const result = await upsertCrawledItems('site-b', [
+      { title: 'Source B title', url: 'https://b.example/555', identities: [identity] },
+    ], 200)
+    const groups = await listItemGroupsBySite('site-b')
+    expect(result).toMatchObject({ insertedCount: 1, exactDuplicateCount: 0 })
+    expect(groups).toHaveLength(1)
+    expect(groups[0]?.items).toHaveLength(2)
+    expect(groups[0]?.reason).toBe('global-identity')
+  })
+
+  it('stores similar titles in a collapsed group and supports exclusion', async () => {
+    await upsertCrawledItems('site-a', [
+      { title: '1위 [HD] Example Amazing Video 1.2GB', url: 'https://example.com/one' },
+    ], 100)
+    const result = await upsertCrawledItems('site-a', [
+      { title: '2위 Example Amazing Video 900MB', url: 'https://example.com/two' },
+    ], 200)
+    let groups = await listItemGroupsBySite('site-a')
+    expect(result).toMatchObject({ insertedCount: 1, similarGroupedCount: 1, uniqueInsertedCount: 0 })
+    expect(groups).toHaveLength(1)
+    expect(groups[0]?.items).toHaveLength(2)
+
+    const separated = groups[0]?.items.find((item) => item.url.endsWith('/two'))
+    expect(separated).toBeDefined()
+    await excludeItemFromSimilarityGroup(separated?.id ?? '')
+    groups = await listItemGroupsBySite('site-a')
+    expect(groups).toHaveLength(2)
+    expect((await db.items.get(separated?.id ?? ''))?.similarityExcluded).toBe(true)
+  })
+
+  it('merges exact groups when a new item bridges global identities', async () => {
+    await upsertCrawledItems('site-a', [{
+      title: 'First global item', url: 'https://a.example/one',
+      identities: [{ kind: 'media-id', value: 'video:one', scope: 'global' }],
+    }], 100)
+    await upsertCrawledItems('site-b', [{
+      title: 'Second global item', url: 'https://b.example/two',
+      identities: [{ kind: 'media-id', value: 'video:two', scope: 'global' }],
+    }], 200)
+    await upsertCrawledItems('site-c', [{
+      title: 'Bridge global item', url: 'https://c.example/bridge',
+      identities: [
+        { kind: 'media-id', value: 'video:one', scope: 'global' },
+        { kind: 'media-id', value: 'video:two', scope: 'global' },
+      ],
+    }], 300)
+    const groups = await listItemGroupsBySite('site-c')
+    expect(groups[0]?.items).toHaveLength(3)
+    expect(new Set(groups[0]?.items.map((item) => item.contentGroupId)).size).toBe(1)
+  })
+
+  it('backfills legacy items in resumable idempotent batches', async () => {
+    await db.items.bulkPut([
+      { id: 'legacy-1', siteId: 'site-a', title: '1위 Legacy same long title 1.2GB', url: 'https://example.com/one', crawledAt: 1 },
+      { id: 'legacy-2', siteId: 'site-a', title: '2위 Legacy same long title 900MB', url: 'https://example.com/two', crawledAt: 2 },
+    ])
+    const first = await runItemSignatureBackfillBatch(1)
+    expect(first).toMatchObject({ processed: 1, total: 2, complete: false })
+    const second = await runItemSignatureBackfillBatch(1)
+    expect(second).toMatchObject({ processed: 2, total: 2, complete: true })
+    const signatureCount = await db.itemSignatures.count()
+    expect(await runItemSignatureBackfillBatch(1)).toEqual(second)
+    expect(await db.itemSignatures.count()).toBe(signatureCount)
+    expect((await getItemBackfillProgress()).complete).toBe(true)
+    expect((await db.items.get('legacy-1'))?.normalizedTitle).toBeTruthy()
+    expect((await listItemGroupsBySite('site-a'))[0]?.items).toHaveLength(2)
+  })
+
+  it('keeps only the configured number of diagnostics per site', async () => {
+    for (let index = 1; index <= 4; index += 1) {
+      await saveCrawlDiagnostic(
+        {
+          runId: `run-${index}`,
+          siteId: 'site-1',
+          createdAt: index,
+          inputSource: 'dom-html',
+          mimeType: 'text/html',
+          encoding: 'gzip',
+          originalBytes: 1,
+          storedBytes: 1,
+          payload: new Uint8Array([index]),
+        },
+        { maxPerSite: 3, maxAgeMs: 1_000 },
+      )
+    }
+
+    expect(await getCrawlDiagnostic('run-1')).toBeUndefined()
+    expect(await getCrawlDiagnostic('run-2')).toBeDefined()
+    expect(await db.crawlDiagnostics.count()).toBe(3)
+  })
+
+  it('removes diagnostics older than the retention window', async () => {
+    await saveCrawlDiagnostic(
+      {
+        runId: 'old-run',
+        siteId: 'site-1',
+        createdAt: 1,
+        inputSource: 'dom-html',
+        mimeType: 'text/html',
+        encoding: 'gzip',
+        originalBytes: 1,
+        storedBytes: 1,
+        payload: new Uint8Array([1]),
+      },
+      { maxPerSite: 3, maxAgeMs: 1_000 },
+    )
+    await saveCrawlDiagnostic(
+      {
+        runId: 'new-run',
+        siteId: 'site-2',
+        createdAt: 2_000,
+        inputSource: 'api-json',
+        mimeType: 'application/json',
+        encoding: 'gzip',
+        originalBytes: 1,
+        storedBytes: 1,
+        payload: new Uint8Array([2]),
+      },
+      { maxPerSite: 3, maxAgeMs: 1_000 },
+    )
+
+    expect(await getCrawlDiagnostic('old-run')).toBeUndefined()
+    expect(await getCrawlDiagnostic('new-run')).toBeDefined()
   })
 })

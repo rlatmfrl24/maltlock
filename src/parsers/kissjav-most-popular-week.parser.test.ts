@@ -3,12 +3,12 @@ import { describe, expect, it } from 'vitest'
 import { kissjavMostPopularWeekParser } from './kissjav-most-popular-week.parser'
 
 function loadFixture(): string {
-  const fixturePath = new URL('../../public/sample/kissav_example.html', import.meta.url)
+  const fixturePath = new URL('../test/fixtures/parsers/kissav_example.html', import.meta.url)
   return readFileSync(fixturePath, 'utf-8')
 }
 
 function loadNewFixture(): string {
-  const fixturePath = new URL('../../public/sample/kissjav_new.html', import.meta.url)
+  const fixturePath = new URL('../test/fixtures/parsers/kissjav_new.html', import.meta.url)
   return readFileSync(fixturePath, 'utf-8')
 }
 

@@ -1,5 +1,6 @@
 import type { ParsedItem, SiteParser } from '../types/contracts'
 import { cleanText, dedupeByUrlAndTitle, toAbsoluteUrl } from './utils'
+import { canonicalPathIdentity, contentCodeIdentities } from './identities'
 
 const KISSJAV_VIDEO_ANCHOR_REGEX =
   /<a\s+([^>]*href=["'][^"']*\/video\/[^"']*["'][^>]*)>([\s\S]*?)<\/a>/gi
@@ -67,9 +68,15 @@ export const kissjavMostPopularWeekParser: SiteParser = (
       continue
     }
 
+    const url = toAbsoluteUrl(rawUrl, pageUrl)
+    const canonicalIdentity = canonicalPathIdentity(url)
     parsed.push({
       title,
-      url: toAbsoluteUrl(rawUrl, pageUrl),
+      url,
+      identities: [
+        ...(canonicalIdentity ? [canonicalIdentity] : []),
+        ...contentCodeIdentities(title, url),
+      ],
       previewImageUrl: extractPreviewImage(anchorInnerHtml, pageUrl),
     })
   }

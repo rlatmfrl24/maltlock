@@ -3,17 +3,17 @@ import { describe, expect, it } from 'vitest'
 import { konePornvideoHotParser } from './kone-pornvideo-hot.parser'
 
 function loadFixture(): string {
-  const fixturePath = new URL('../../public/sample/kone_example.html', import.meta.url)
+  const fixturePath = new URL('../test/fixtures/parsers/kone_example.html', import.meta.url)
   return readFileSync(fixturePath, 'utf-8')
 }
 
 function loadFixture2(): string {
-  const fixturePath = new URL('../../public/sample/kone_example2.html', import.meta.url)
+  const fixturePath = new URL('../test/fixtures/parsers/kone_example2.html', import.meta.url)
   return readFileSync(fixturePath, 'utf-8')
 }
 
 function loadNewFixture(): string {
-  const fixturePath = new URL('../../public/sample/kone_new.html', import.meta.url)
+  const fixturePath = new URL('../test/fixtures/parsers/kone_new.html', import.meta.url)
   return readFileSync(fixturePath, 'utf-8')
 }
 
@@ -107,12 +107,20 @@ describe('konePornvideoHotParser', () => {
         title: 'First title',
         url: 'https://kone.gg/s/pornvideo/article-1?mode=hot',
         dedupeKey: 'kone:path:/s/pornvideo/article-1',
+        identities: [
+          { kind: 'source-id', value: 'article-1', scope: 'site' },
+          { kind: 'canonical-url', value: '/s/pornvideo/article-1?mode=hot', scope: 'site' },
+        ],
         previewImageUrl: 'https://img.example.com/first.jpg',
       },
       {
         title: 'Second title',
         url: 'https://kone.gg/s/pornvideo/article-2?mode=hot',
         dedupeKey: 'kone:path:/s/pornvideo/article-2',
+        identities: [
+          { kind: 'source-id', value: 'article-2', scope: 'site' },
+          { kind: 'canonical-url', value: '/s/pornvideo/article-2?mode=hot', scope: 'site' },
+        ],
         previewImageUrl: 'https://img.example.com/second.jpg',
       },
     ])
@@ -133,6 +141,10 @@ describe('konePornvideoHotParser', () => {
         title: 'Third title',
         url: 'https://kone.gg/s/pornvideo/article-3?mode=hot',
         dedupeKey: 'kone:path:/s/pornvideo/article-3',
+        identities: [
+          { kind: 'source-id', value: 'article-3', scope: 'site' },
+          { kind: 'canonical-url', value: '/s/pornvideo/article-3?mode=hot', scope: 'site' },
+        ],
         previewImageUrl: 'https://img.example.com/third.jpg',
       },
     ])
@@ -153,6 +165,10 @@ describe('konePornvideoHotParser', () => {
         title: 'Dom title',
         url: 'https://kone.gg/s/pornvideo/dom-article?mode=hot',
         dedupeKey: 'kone:path:/s/pornvideo/dom-article',
+        identities: [
+          { kind: 'source-id', value: 'dom-article', scope: 'site' },
+          { kind: 'canonical-url', value: '/s/pornvideo/dom-article?mode=hot', scope: 'site' },
+        ],
         previewImageUrl: 'https://img.example.com/dom.jpg',
       },
     ])

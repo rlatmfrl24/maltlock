@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { xrankingRankingParser } from './xranking-ranking.parser'
 
 function loadFixture(): string {
-  const fixturePath = new URL('../../public/sample/xranking_example.html', import.meta.url)
+  const fixturePath = new URL('../test/fixtures/parsers/xranking_example.html', import.meta.url)
   return readFileSync(fixturePath, 'utf-8')
 }
 

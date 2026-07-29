@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Maltlock extension logo</title>
+  <desc id="desc">A compact Maltlock logo combining a lock, data lanes, and an M monogram.</desc>
+  <defs>
+    <linearGradient id="bg" x1="18" y1="12" x2="110" y2="118" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#101010" />
+      <stop offset="0.58" stop-color="#2d2d2d" />
+      <stop offset="1" stop-color="#535353" />
+    </linearGradient>
+    <linearGradient id="metal" x1="36" y1="54" x2="91" y2="109" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" />
+      <stop offset="0.58" stop-color="#d9d9d9" />
+      <stop offset="1" stop-color="#a9a9a9" />
+    </linearGradient>
+    <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="7" stdDeviation="5" flood-color="#000000" flood-opacity="0.34" />
+    </filter>
+  </defs>
+
+  <rect x="6" y="6" width="116" height="116" rx="26" fill="url(#bg)" />
+  <rect x="7.5" y="7.5" width="113" height="113" rx="24.5" fill="none" stroke="#ffffff" stroke-opacity="0.12" stroke-width="3" />
+
+  <g opacity="0.9" stroke-linecap="round" stroke-width="4">
+    <path d="M22 40h16" stroke="#f1c84c" />
+    <path d="M16 55h22" stroke="#f1c84c" stroke-opacity="0.78" />
+    <path d="M24 70h14" stroke="#f1c84c" stroke-opacity="0.58" />
+    <circle cx="41" cy="40" r="3.5" fill="#f1c84c" />
+    <circle cx="41" cy="55" r="3.5" fill="#f1c84c" fill-opacity="0.78" />
+    <circle cx="41" cy="70" r="3.5" fill="#f1c84c" fill-opacity="0.58" />
+  </g>
+
+  <g opacity="0.88" stroke-linecap="round" stroke-width="4">
+    <path d="M90 40h16" stroke="#69e1d1" />
+    <path d="M90 55h22" stroke="#69e1d1" stroke-opacity="0.78" />
+    <path d="M90 70h14" stroke="#69e1d1" stroke-opacity="0.58" />
+    <circle cx="87" cy="40" r="3.5" fill="#69e1d1" />
+    <circle cx="87" cy="55" r="3.5" fill="#69e1d1" fill-opacity="0.78" />
+    <circle cx="87" cy="70" r="3.5" fill="#69e1d1" fill-opacity="0.58" />
+  </g>
+
+  <g filter="url(#soft-shadow)">
+    <path d="M43 59v-9c0-14 8.6-24 21-24s21 10 21 24v9" fill="none" stroke="#111111" stroke-width="16" stroke-linecap="round" />
+    <path d="M43 59v-9c0-14 8.6-24 21-24s21 10 21 24v9" fill="none" stroke="#f5f5f5" stroke-width="10" stroke-linecap="round" />
+    <rect x="29" y="55" width="70" height="51" rx="15" fill="url(#metal)" />
+    <rect x="31.5" y="57.5" width="65" height="46" rx="12.5" fill="none" stroke="#ffffff" stroke-opacity="0.54" stroke-width="3" />
+    <path d="M44 90V70l10 12 10-16 10 16 10-12v20" fill="none" stroke="#121212" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" />
+  </g>
+</svg>

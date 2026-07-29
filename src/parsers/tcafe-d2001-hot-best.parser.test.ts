@@ -3,12 +3,12 @@ import { describe, expect, it } from 'vitest'
 import { tcafeD2001HotBestParser } from './tcafe-d2001-hot-best.parser'
 
 function loadFixture(): string {
-  const fixturePath = new URL('../../public/sample/tcafe_example.html', import.meta.url)
+  const fixturePath = new URL('../test/fixtures/parsers/tcafe_example.html', import.meta.url)
   return readFileSync(fixturePath, 'utf-8')
 }
 
 function loadNewFixture(): string {
-  const fixturePath = new URL('../../public/sample/tcafe_new.html', import.meta.url)
+  const fixturePath = new URL('../test/fixtures/parsers/tcafe_new.html', import.meta.url)
   return readFileSync(fixturePath, 'utf-8')
 }
 
