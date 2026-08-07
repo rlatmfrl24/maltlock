@@ -22,6 +22,8 @@ interface RankedParsedItem extends ParsedItem {
 }
 
 interface NimiApiUploader {
+  id?: string | number | null
+  url?: string | null
   handle?: string | null
   display_name?: string | null
   name?: string | null
@@ -29,6 +31,8 @@ interface NimiApiUploader {
 
 interface NimiApiPost {
   id?: string | number | null
+  url?: string | null
+  author?: NimiApiUploader | null
   uploader?: NimiApiUploader | null
 }
 
@@ -36,7 +40,9 @@ interface NimiApiVideo {
   video_id?: string | number | null
   id?: string | number | null
   title?: string | null
+  file_url?: string | null
   direct_url?: string | null
+  hls_url?: string | null
   thumbnail_url?: string | null
   posts?: NimiApiPost[] | null
   play_count?: number | null
@@ -81,7 +87,28 @@ function normalizeStatusUrl(statusUrl: string | undefined): string | undefined {
     return undefined
   }
 
-  return statusUrl.trim()
+  try {
+    const parsed = new URL(decodeHtmlEntities(statusUrl.trim()))
+    const hostname = parsed.hostname.toLowerCase()
+    if (
+      (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') ||
+      (hostname !== 'x.com' &&
+        hostname !== 'www.x.com' &&
+        hostname !== 'twitter.com' &&
+        hostname !== 'www.twitter.com')
+    ) {
+      return undefined
+    }
+
+    const statusMatch = parsed.pathname.match(/^\/([^/]+)\/status\/(\d+)/i)
+    if (!statusMatch?.[1] || !statusMatch[2]) {
+      return undefined
+    }
+
+    return `https://x.com/${statusMatch[1]}/status/${statusMatch[2]}`
+  } catch {
+    return undefined
+  }
 }
 
 function extractVideoIdentity(videoUrl: string): string {
@@ -182,12 +209,18 @@ function toOptionalText(input: string | null | undefined): string | undefined {
 
 function extractFirstStatusUrl(posts: NimiApiPost[] | null | undefined): string | undefined {
   for (const post of posts ?? []) {
+    const explicitStatusUrl = normalizeStatusUrl(post.url ?? undefined)
+    if (explicitStatusUrl) {
+      return explicitStatusUrl
+    }
+
     const postId = `${post.id ?? ''}`.trim()
     if (!/^\d+$/.test(postId)) {
       continue
     }
 
-    const handle = cleanText(post.uploader?.handle ?? '')
+    const account = post.author ?? post.uploader
+    const handle = cleanText(account?.handle ?? '').replace(/^@/, '')
     if (handle) {
       return normalizeStatusUrl(`https://x.com/${handle}/status/${postId}`)
     }
@@ -238,14 +271,15 @@ function deriveApiTitle(video: NimiApiVideo): string | undefined {
   }
 
   const firstPost = video.posts?.[0]
+  const account = firstPost?.author ?? firstPost?.uploader
   const displayName = toOptionalText(
-    firstPost?.uploader?.display_name ?? firstPost?.uploader?.name,
+    account?.display_name ?? account?.name,
   )
   if (displayName) {
     return `${displayName}님의 동영상`
   }
 
-  const handle = toOptionalText(firstPost?.uploader?.handle)
+  const handle = toOptionalText(account?.handle)
   if (handle) {
     return `${handle}님의 동영상`
   }
@@ -278,7 +312,9 @@ function parseApiPayload(input: string, pageUrl: string): ParsedItem[] | undefin
   let entryIndex = 0
 
   for (const video of videos) {
-    const rawVideoUrl = `${video.direct_url ?? ''}`.trim()
+    const rawVideoUrl = [video.file_url, video.direct_url, video.hls_url]
+      .map((value) => `${value ?? ''}`.trim())
+      .find(Boolean)
     const rawPreviewImageUrl = `${video.thumbnail_url ?? ''}`.trim()
 
     if (!rawVideoUrl) {

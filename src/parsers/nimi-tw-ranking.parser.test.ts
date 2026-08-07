@@ -136,6 +136,64 @@ describe('nimiTwRankingParser', () => {
     expect(items[0]?.rawHtmlSnippet).toBe('조회수 44600')
   })
 
+  it('uses the canonical post url and author from the latest nimi api shape', () => {
+    const payload = JSON.stringify([
+      {
+        id: '019fc239-b0fd-7d08-8996-aef9b089b3bb',
+        platform: 'tw',
+        thumbnail_url:
+          'https://pbs.twimg.com/amplify_video_thumb/2083228586283270144/img/SwHHGwXqAK2hxZh4.jpg?name=orig',
+        file_url:
+          'https://video.twimg.com/amplify_video/2083228586283270144/vid/avc1/606x1080/5vEewIYrpeyae88j.mp4?tag=14',
+        hls_url: null,
+        duration: 402,
+        posts: [
+          {
+            id: '019fc239-b0fa-7f9e-9236-9227b5a42a4a',
+            url: 'https://x.com/i/status/2083228633158881610',
+            author: {
+              id: '019fc239-b0f8-7841-95a2-c706d3fbb781',
+              url: 'https://x.com/_6509076246112',
+              handle: '_6509076246112',
+              name: '˗ˏˋ 𝐦𝐢𝐮✿',
+            },
+            posted_at: '2026-07-31T16:29:45Z',
+          },
+        ],
+        created_at: '2026-08-02T11:26:28.60021Z',
+        play_count: 40089,
+      },
+    ])
+
+    const items = nimiTwRankingParser(
+      payload,
+      'https://tw3.nimi.wiki/ranking/week',
+    )
+
+    expect(items).toHaveLength(1)
+    expect(items[0]?.title).toBe('1위 - ˗ˏˋ 𝐦𝐢𝐮✿님의 동영상')
+    expect(items[0]?.url).toBe(
+      'https://video.twimg.com/amplify_video/2083228586283270144/vid/avc1/606x1080/5vEewIYrpeyae88j.mp4?tag=14',
+    )
+    expect(items[0]?.summary).toBe(
+      'https://x.com/i/status/2083228633158881610',
+    )
+    expect(items[0]?.identities).toEqual(
+      expect.arrayContaining([
+        {
+          kind: 'media-id',
+          value: 'video:2083228586283270144',
+          scope: 'global',
+        },
+        {
+          kind: 'media-id',
+          value: 'tweet:2083228633158881610',
+          scope: 'global',
+        },
+      ]),
+    )
+  })
+
   it('dedupes duplicate video ids and keeps the higher rank item', () => {
     const payload = JSON.stringify({
       success: true,
