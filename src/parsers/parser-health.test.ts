@@ -40,11 +40,11 @@ const cases: ParserHealthCase[] = [
     primary: true,
   },
   {
-    name: 'Nimi API ranking',
+    name: 'Nimi current video API ranking',
     siteId: 'nimi-tw-ranking',
-    fixture: 'nimi_ranking_example.json',
-    pageUrl: 'https://tw1.nimi.wiki/ko/ranking/week',
-    expectation: { minimumCount: 16, preview: 'all', dedupeKey: 'required' },
+    fixture: 'nimi_video_api_current.json',
+    pageUrl: 'https://video.nimi.wiki/tw/ranking/week',
+    expectation: { exactCount: 2, preview: 'all', dedupeKey: 'required' },
     primary: true,
   },
   {

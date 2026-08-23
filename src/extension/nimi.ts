@@ -6,6 +6,9 @@ const ACTIVE_TAB_ELEMENT_REGEX =
   /<(?:button|a)\b[^>]*class=["'][^"']*(?:tab-active|bg-violet-500\/20)[^"']*["'][^>]*>([\s\S]*?)<\/(?:button|a)>/gi
 const ACTIVE_PERIOD_BUTTON_REGEX =
   /<button\b[^>]*class=["'][^"']*shadow-violet-500\/50[^"']*["'][^>]*>([\s\S]*?)<\/button>/gi
+const VIDEO_API_URL_REGEX = /\bvideoApiUrl\s*:\s*["']([^"']+)["']/i
+const CURRENT_NIMI_HOST = 'video.nimi.wiki'
+const CURRENT_NIMI_API_URL = 'https://api.nimi.wiki/video'
 
 const PERIOD_BY_QUERY_VALUE: Record<string, NimiPeriod> = {
   hour: 'hourly',
@@ -105,6 +108,38 @@ function getNimiApiOrigin(tabUrl: string): string | undefined {
   }
 }
 
+function normalizeNimiVideoApiUrl(input: string): string | undefined {
+  try {
+    const parsed = new URL(decodeURIComponent(input.replace(/&amp;/gi, '&')))
+
+    if (
+      parsed.protocol !== 'https:' ||
+      (parsed.hostname !== 'nimi.wiki' && !parsed.hostname.endsWith('.nimi.wiki'))
+    ) {
+      return undefined
+    }
+
+    parsed.search = ''
+    parsed.hash = ''
+    return parsed.toString().replace(/\/$/, '')
+  } catch {
+    return undefined
+  }
+}
+
+function getConfiguredVideoApiUrl(html: string): string | undefined {
+  const rawApiUrl = VIDEO_API_URL_REGEX.exec(html)?.[1]
+  return rawApiUrl ? normalizeNimiVideoApiUrl(rawApiUrl) : undefined
+}
+
+function isCurrentNimiHost(tabUrl: string): boolean {
+  try {
+    return new URL(tabUrl).hostname === CURRENT_NIMI_HOST
+  } catch {
+    return false
+  }
+}
+
 export function getNimiActiveView(html: string, tabUrl: string): NimiView {
   const viewFromUrl = getNimiViewFromTabUrl(tabUrl)
   if (viewFromUrl) {
@@ -166,17 +201,28 @@ export function getNimiActivePeriod(html: string, tabUrl: string): NimiPeriod {
 }
 
 export function buildNimiApiUrl(html: string, tabUrl: string): string | undefined {
-  const origin = getNimiApiOrigin(tabUrl)
-  if (!origin) {
+  const activeView = getNimiActiveView(html, tabUrl)
+  const currentApiUrl = getConfiguredVideoApiUrl(html) ??
+    (isCurrentNimiHost(tabUrl) ? CURRENT_NIMI_API_URL : undefined)
+
+  if (currentApiUrl) {
+    if (activeView === 'ranking') {
+      const activePeriod = getNimiActivePeriod(html, tabUrl)
+      return `${currentApiUrl}/tw/ranking/${API_PERIOD_BY_PERIOD[activePeriod]}`
+    }
+
+    return `${currentApiUrl}/tw/${activeView}`
+  }
+
+  const legacyOrigin = getNimiApiOrigin(tabUrl)
+  if (!legacyOrigin) {
     return undefined
   }
 
-  const activeView = getNimiActiveView(html, tabUrl)
-
   if (activeView === 'ranking') {
     const activePeriod = getNimiActivePeriod(html, tabUrl)
-    return `${origin}/api/tw/ranking/${API_PERIOD_BY_PERIOD[activePeriod]}`
+    return `${legacyOrigin}/api/tw/ranking/${API_PERIOD_BY_PERIOD[activePeriod]}`
   }
 
-  return `${origin}/api/tw/${activeView}`
+  return `${legacyOrigin}/api/tw/${activeView}`
 }

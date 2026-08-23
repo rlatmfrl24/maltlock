@@ -7,12 +7,40 @@ function loadApiFixture(): string {
   return readFileSync(fixturePath, 'utf-8')
 }
 
+function loadCurrentApiFixture(): string {
+  const fixturePath = new URL(
+    '../test/fixtures/parsers/nimi_video_api_current.json',
+    import.meta.url,
+  )
+  return readFileSync(fixturePath, 'utf-8')
+}
+
 function loadHtmlFixture(): string {
   const fixturePath = new URL('../test/fixtures/parsers/nimi_example.html', import.meta.url)
   return readFileSync(fixturePath, 'utf-8')
 }
 
 describe('nimiTwRankingParser', () => {
+  it('extracts playable media and canonical posts from the current video API', () => {
+    const items = nimiTwRankingParser(
+      loadCurrentApiFixture(),
+      'https://video.nimi.wiki/tw/ranking/week',
+    )
+
+    expect(items).toHaveLength(2)
+    expect(items[0]).toMatchObject({
+      title: '1위 - 민채님의 동영상',
+      url: 'https://video.twimg.com/amplify_video/2089699551397687296/vid/avc1/720x1280/fA1JY_y85FR6jybH.mp4?tag=14',
+      previewImageUrl:
+        'https://pbs.twimg.com/amplify_video_thumb/2089699551397687296/img/IKfqYS4Y-zRMOp9m.jpg?name=orig',
+      summary: 'https://x.com/i/status/2089701208718233715',
+      dedupeKey: 'nimi:video-id:01a01509-9e6e-7616-8a3b-f97ea6d8b235',
+      rawHtmlSnippet: '조회수 29686',
+    })
+    expect(items.every((item) => item.url.startsWith('https://video.twimg.com/'))).toBe(true)
+    expect(items.every((item) => item.summary?.startsWith('https://x.com/'))).toBe(true)
+  })
+
   it('extracts ranking items from the nimi api payload', () => {
     const items = nimiTwRankingParser(loadApiFixture(), 'https://tw.nimi.wiki/')
 

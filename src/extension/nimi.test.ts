@@ -2,6 +2,36 @@ import { describe, expect, it } from 'vitest'
 import { buildNimiApiUrl, getNimiActivePeriod, getNimiActiveView } from './nimi'
 
 describe('nimi helper', () => {
+  it('builds the separated video api url from the current Nuxt config', () => {
+    const html = `
+      <script>
+        window.__NUXT__.config={public:{videoApiUrl:"https://api.nimi.wiki/video"}}
+      </script>
+    `
+
+    expect(
+      buildNimiApiUrl(html, 'https://video.nimi.wiki/tw/ranking/week'),
+    ).toBe('https://api.nimi.wiki/video/tw/ranking/week')
+  })
+
+  it('uses the known current api when the runtime config is absent', () => {
+    expect(
+      buildNimiApiUrl('', 'https://video.nimi.wiki/tw/ranking/day'),
+    ).toBe('https://api.nimi.wiki/video/tw/ranking/day')
+  })
+
+  it('does not accept a video api url outside the NimiWiki domain', () => {
+    const html = `
+      <script>
+        window.__NUXT__.config={public:{videoApiUrl:"https://example.com/video"}}
+      </script>
+    `
+
+    expect(
+      buildNimiApiUrl(html, 'https://video.nimi.wiki/tw/ranking/week'),
+    ).toBe('https://api.nimi.wiki/video/tw/ranking/week')
+  })
+
   it('builds the current ranking api url from active tab and period markup', () => {
     const html = `
       <div class="hidden md:flex">

@@ -25,8 +25,9 @@ export const targetSites: TargetSite[] = [
   {
     id: "nimi-tw-ranking",
     name: "NimiWiki",
-    url: "https://tw3.nimi.wiki/ranking/week",
+    url: "https://video.nimi.wiki/tw/ranking/week",
     matchPatterns: [
+      "https://video.nimi.wiki/*",
       "https://tw.nimi.wiki/*",
       "https://tw1.nimi.wiki/*",
       "https://tw2.nimi.wiki/*",

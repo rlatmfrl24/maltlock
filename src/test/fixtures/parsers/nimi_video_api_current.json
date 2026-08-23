@@ -1,0 +1,48 @@
+[
+  {
+    "id": "01a01509-9e6e-7616-8a3b-f97ea6d8b235",
+    "thumbnail_url": "https://pbs.twimg.com/amplify_video_thumb/2089699551397687296/img/IKfqYS4Y-zRMOp9m.jpg?name=orig",
+    "file_url": "https://video.twimg.com/amplify_video/2089699551397687296/vid/avc1/720x1280/fA1JY_y85FR6jybH.mp4?tag=14",
+    "hls_url": "https://video.twimg.com/amplify_video/2089699551397687296/pl/CcfjFJCXpQC0shae.m3u8?tag=14",
+    "duration": 248,
+    "platform": "tw",
+    "posts": [
+      {
+        "id": "01a01509-9e6c-7c45-98f5-f1eb8d3302bc",
+        "url": "https://x.com/i/status/2089701208718233715",
+        "author": {
+          "id": "01a01509-9e6a-7b68-95e3-311922723fb5",
+          "url": "https://x.com/i39845315",
+          "handle": "i39845315",
+          "name": "민채"
+        },
+        "posted_at": "2026-08-18T13:09:27Z"
+      }
+    ],
+    "created_at": "2026-08-18T13:22:27.050405Z",
+    "play_count": 29686
+  },
+  {
+    "id": "01a00b24-2adc-739b-b79e-9dafeb271437",
+    "thumbnail_url": "https://pbs.twimg.com/amplify_video_thumb/2088810700013775897/img/RZIXsXzCYugqCdZB.jpg?name=orig",
+    "file_url": "https://video.twimg.com/amplify_video/2088810700013775897/vid/avc1/1280x720/5C_8UbWEsQLEV8TA.mp4?tag=14",
+    "hls_url": "https://video.twimg.com/amplify_video/2088810700013775897/pl/xZ49Zm0j1RtkooH2.m3u8?tag=14",
+    "duration": 455,
+    "platform": "tw",
+    "posts": [
+      {
+        "id": "01a00b24-2ada-75ce-9bca-41fcf5eaae3d",
+        "url": "https://x.com/i/status/2088811722224402693",
+        "author": {
+          "id": "019fabb4-736a-73de-bc93-0cbfab7f35fe",
+          "url": "https://x.com/v30w4m5b2r53639",
+          "handle": "v30w4m5b2r53639",
+          "name": "걍아지"
+        },
+        "posted_at": "2026-08-16T02:14:57Z"
+      }
+    ],
+    "created_at": "2026-08-16T15:15:14.775545Z",
+    "play_count": 29258
+  }
+]
