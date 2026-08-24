@@ -8,6 +8,7 @@ import { nimiTwRankingParser } from './nimi-tw-ranking.parser'
 import { tcafeD2001HotBestParser } from './tcafe-d2001-hot-best.parser'
 import { twidougaRankingT1Parser } from './twidouga-ranking-t1.parser'
 import { xrankingRankingParser } from './xranking-ranking.parser'
+import { ydkoreaPopularBestParser } from './ydkorea-popular-best.parser'
 
 const parserRegistry: Record<string, SiteParser> = {
   'hacker-news': hackerNewsParser,
@@ -19,6 +20,7 @@ const parserRegistry: Record<string, SiteParser> = {
   'twidouga-ranking-t1': twidougaRankingT1Parser,
   'kone-pornvideo-hot': konePornvideoHotParser,
   'xranking-ranking': xrankingRankingParser,
+  'ydkorea-popular-best': ydkoreaPopularBestParser,
 }
 
 export function parseByParserId(

@@ -13,4 +13,23 @@ describe('targetSites', () => {
       site && siteMatchesUrl(site, 'https://tw2.nimi.wiki/ranking/week'),
     ).toBe(true)
   })
+
+  it('registers the ydkorea tab with the requested popular listing', () => {
+    const site = getTargetSiteById('ydkorea-popular-best')
+
+    expect(site).toEqual({
+      id: 'ydkorea-popular-best',
+      name: 'ydkorea',
+      url: 'https://yadongkorea02.tv/popular?vType=best&bo_table=korea',
+      matchPatterns: ['https://yadongkorea02.tv/*'],
+      parserId: 'ydkorea-popular-best',
+    })
+    expect(
+      site &&
+        siteMatchesUrl(
+          site,
+          'https://yadongkorea02.tv/popular?vType=best&bo_table=korea',
+        ),
+    ).toBe(true)
+  })
 })

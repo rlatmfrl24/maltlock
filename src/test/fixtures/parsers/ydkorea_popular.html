@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko">
+  <body>
+    <div id="list">
+      <form>
+        <input type="hidden" name="bo_table" value="korea">
+        <ul>
+          <li onclick="location.href='/video/SampleVideoId01';">
+            <div class="box" style="position:relative;">
+              <div class="thumb">
+                <img src="https://k.vdnext.com/cast2/sample-01/thumbnail.jpg?v=origin" alt="">
+                <span class="ctg">샘플</span>
+              </div>
+              <div class="title">첫 번째 샘플 &amp; 특별편</div>
+              <div class="etc"><span>조회 1,234</span></div>
+            </div>
+          </li>
+          <li onclick='location.href="https://yadongkorea02.tv/video/SampleVideoId02?from=popular";'>
+            <div class="box">
+              <div class="thumb featured">
+                <img data-kind="preview" src="/images/sample-02.jpg" alt="">
+              </div>
+              <div class="title featured">두 번째 샘플</div>
+            </div>
+          </li>
+          <li>
+            <a href="/video/SampleVideoId03">
+              <div class="thumb"><img src="/images/sample-03.jpg" alt=""></div>
+              <div class="title">앵커 대체 경로</div>
+            </a>
+          </li>
+          <li onclick="location.href='/category/korea';">
+            <div class="title">영상이 아닌 항목</div>
+          </li>
+          <li onclick="location.href='/video/MissingPreview';">
+            <div class="title">썸네일이 없는 항목</div>
+          </li>
+        </ul>
+      </form>
+    </div>
+  </body>
+</html>

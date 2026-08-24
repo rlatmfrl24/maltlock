@@ -49,6 +49,13 @@ export const targetSites: TargetSite[] = [
     matchPatterns: ["https://tcafe21.com/*"],
     parserId: "tcafe-d2001-hot-best",
   },
+  {
+    id: "ydkorea-popular-best",
+    name: "ydkorea",
+    url: "https://yadongkorea02.tv/popular?vType=best&bo_table=korea",
+    matchPatterns: ["https://yadongkorea02.tv/*"],
+    parserId: "ydkorea-popular-best",
+  },
 ];
 
 export const hostMatchPatterns = Array.from(

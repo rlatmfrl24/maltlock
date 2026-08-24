@@ -24,6 +24,7 @@ React + TypeScript + Vite 기반 Chrome MV3 사이드패널 확장입니다.
 - NimiWiki: `https://tw1.nimi.wiki/ko/ranking/week`
 - Kone: `https://kone.gg/s/pornvideo?mode=hot`
 - Tcafe: `https://tcafe21.com/bbs/board.php?bo_table=D2001`
+- ydkorea: `https://yadongkorea02.tv/popular?vType=best&bo_table=korea`
 
 ## 데이터 모델
 ### `items`
