@@ -90,7 +90,7 @@ test('sidepanel smoke check', async () => {
       'aria-pressed',
       'true',
     )
-    await expect(page.getByRole('button', { name: /ydkorea/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /ydkorea/ })).toHaveCount(0)
     await expect(page.getByRole('button', { name: /사생활 모드/ })).toBeVisible()
     await page.getByText('실행 진단').click()
     await expect(

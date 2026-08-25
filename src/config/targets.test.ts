@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getTargetSiteById, siteMatchesUrl } from './targets'
+import { getTargetSiteById, hostMatchPatterns, siteMatchesUrl } from './targets'
 
 describe('targetSites', () => {
   it('uses the current NimiWiki host and retains legacy host compatibility', () => {
@@ -14,22 +14,8 @@ describe('targetSites', () => {
     ).toBe(true)
   })
 
-  it('registers the ydkorea tab with the requested popular listing', () => {
-    const site = getTargetSiteById('ydkorea-popular-best')
-
-    expect(site).toEqual({
-      id: 'ydkorea-popular-best',
-      name: 'ydkorea',
-      url: 'https://yadongkorea02.tv/popular?vType=best&bo_table=korea',
-      matchPatterns: ['https://yadongkorea02.tv/*'],
-      parserId: 'ydkorea-popular-best',
-    })
-    expect(
-      site &&
-        siteMatchesUrl(
-          site,
-          'https://yadongkorea02.tv/popular?vType=best&bo_table=korea',
-        ),
-    ).toBe(true)
+  it('keeps ydkorea collection disabled', () => {
+    expect(getTargetSiteById('ydkorea-popular-best')).toBeUndefined()
+    expect(hostMatchPatterns).not.toContain('https://yadongkorea02.tv/*')
   })
 })

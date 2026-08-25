@@ -70,14 +70,6 @@ const cases: ParserHealthCase[] = [
     expectation: { exactCount: 10, preview: 'none', dedupeKey: 'required' },
     primary: true,
   },
-  {
-    name: 'ydkorea current popular listing',
-    siteId: 'ydkorea-popular-best',
-    fixture: 'ydkorea_popular.html',
-    pageUrl: 'https://yadongkorea02.tv/popular?vType=best&bo_table=korea',
-    expectation: { exactCount: 3, preview: 'all', dedupeKey: 'required' },
-    primary: true,
-  },
 ]
 
 function loadFixture(name: string): string {
