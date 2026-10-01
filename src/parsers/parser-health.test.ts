@@ -42,7 +42,7 @@ const cases: ParserHealthCase[] = [
   {
     name: 'Nimi current video API ranking',
     siteId: 'nimi-tw-ranking',
-    fixture: 'nimi_video_api_current.json',
+    fixture: 'nimi_video_api_items.json',
     pageUrl: 'https://video.nimi.wiki/tw/ranking/week',
     expectation: { exactCount: 2, preview: 'all', dedupeKey: 'required' },
     primary: true,
@@ -59,7 +59,7 @@ const cases: ParserHealthCase[] = [
     siteId: 'kone-pornvideo-hot',
     fixture: 'kone_new.html',
     pageUrl: 'https://kone.gg/s/pornvideo?mode=hot',
-    expectation: { minimumCount: 21, preview: 'all', dedupeKey: 'required' },
+    expectation: { exactCount: 33, preview: 'some', dedupeKey: 'required' },
     primary: true,
   },
   {

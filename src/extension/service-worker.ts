@@ -5,6 +5,8 @@ import {
   upsertCrawledItems,
 } from '../db/repository'
 import { buildNimiApiUrl } from './nimi'
+import { isEmptyNimiApiPayload } from '../parsers/nimi-tw-ranking.parser'
+import { collectHtml } from './collect-html'
 import { parseByParserId } from '../parsers'
 import type {
   CollectHtmlRequest,
@@ -107,19 +109,20 @@ async function fetchNimiApiPayload(
   }
 
   const response = await fetch(apiUrl, {
+    signal: AbortSignal.timeout(15_000),
     headers: {
       accept: 'application/json',
     },
   })
 
   if (!response.ok) {
-    return undefined
+    throw new Error(`NimiWiki API 요청에 실패했습니다. (HTTP ${response.status})`)
   }
 
   const payload = (await response.text()).trim()
 
   if (!payload.startsWith('{') && !payload.startsWith('[')) {
-    return undefined
+    throw new Error('NimiWiki API에서 JSON 목록을 받지 못했습니다.')
   }
 
   return payload
@@ -154,12 +157,16 @@ async function resolveParserInput(
       }
     }
   } catch (error) {
+    const apiError = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+      ? 'NimiWiki API가 15초 안에 응답하지 않았습니다.'
+      : error instanceof Error ? error.message : String(error)
     if (import.meta.env.DEV) {
       console.warn('[maltlock] failed to fetch nimi api payload', {
         tabUrl: collected.tabUrl,
         error: error instanceof Error ? error.message : String(error),
       })
     }
+    throw new CrawlFailure('PARSE_FAILED', apiError)
   }
 
   return {
@@ -303,11 +310,11 @@ async function getActiveTab(): Promise<ActiveTab> {
   return { id: tab.id, url: tab.url }
 }
 
-async function collectHtmlFromTab(tabId: number): Promise<CollectHtmlResponse> {
+async function collectHtmlFromTab(tabId: number, documentId?: string): Promise<CollectHtmlResponse> {
   const request: CollectHtmlRequest = { type: 'COLLECT_HTML' }
 
   try {
-    const response = (await chrome.tabs.sendMessage(tabId, request)) as
+    const response = (await chrome.tabs.sendMessage(tabId, request, documentId ? { documentId } : {})) as
       | CollectHtmlResponse
       | undefined
 
@@ -319,14 +326,8 @@ async function collectHtmlFromTab(tabId: number): Promise<CollectHtmlResponse> {
   }
 
   const executionResults = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: () => ({
-      html: document.documentElement.outerHTML,
-      tabUrl: window.location.href,
-      documentTitle: document.title,
-      readyState: document.readyState,
-      bodyTextLength: document.body?.innerText.length ?? 0,
-    }),
+    target: { tabId, ...(documentId ? { documentIds: [documentId] } : {}) },
+    func: collectHtml,
   })
 
   const result = executionResults[0]?.result
@@ -338,13 +339,7 @@ async function collectHtmlFromTab(tabId: number): Promise<CollectHtmlResponse> {
     )
   }
 
-  return {
-    html: result.html,
-    tabUrl: result.tabUrl,
-    documentTitle: result.documentTitle,
-    readyState: result.readyState,
-    bodyTextLength: result.bodyTextLength,
-  }
+  return result
 }
 
 async function crawlActiveTab(
@@ -379,7 +374,17 @@ async function crawlActiveTab(
       throw new CrawlFailure('INVALID_REQUEST', '사이트 URL 형식이 올바르지 않습니다.')
     }
 
-    const activeTab = await getActiveTab()
+    const requestedTabId = message.payload.tabId
+    if (requestedTabId !== undefined && !Number.isInteger(requestedTabId)) {
+      throw new CrawlFailure('INVALID_REQUEST', '탭 ID 형식이 올바르지 않습니다.')
+    }
+    const tab = requestedTabId === undefined
+      ? await getActiveTab()
+      : await chrome.tabs.get(requestedTabId)
+    if (tab.id === undefined || !tab.url) {
+      throw new CrawlFailure('TAB_NOT_FOUND', '수집할 탭을 찾을 수 없습니다.')
+    }
+    const activeTab = { id: tab.id, url: tab.url }
 
     if (!siteMatchesUrl(site, activeTab.url, targetUrl)) {
       throw new CrawlFailure(
@@ -390,7 +395,19 @@ async function crawlActiveTab(
     }
 
     setCrawlStage(crawlRun, 'collect')
-    const collected = await collectHtmlFromTab(activeTab.id)
+    const collected = await collectHtmlFromTab(activeTab.id, message.payload.expectedDocumentId)
+    // Recheck the captured document: navigation can occur after tabs.get().
+    if (
+      !siteMatchesUrl(site, collected.tabUrl, targetUrl) ||
+      (message.payload.expectedTabUrl &&
+        collected.tabUrl !== message.payload.expectedTabUrl) ||
+      (message.payload.expectedKissjavPage !== undefined &&
+        (siteId !== 'kissjav-most-popular-week' || !Number.isSafeInteger(message.payload.expectedKissjavPage) ||
+          message.payload.expectedKissjavPage < 1 || !collected.kissjavReady ||
+          collected.kissjavPage !== message.payload.expectedKissjavPage))
+    ) {
+      throw new CrawlFailure('TAB_URL_MISMATCH', '수집 중 대상 페이지가 변경되었습니다.')
+    }
     crawlRun.tabUrl = collected.tabUrl
     crawlRun.documentTitle = collected.documentTitle
     crawlRun.readyState = collected.readyState
@@ -425,7 +442,8 @@ async function crawlActiveTab(
     }
 
     crawlRun.parsedCount = parsedItems.length
-    if (parsedItems.length === 0) {
+    const emptyNimiList = site.parserId === 'nimi-tw-ranking' && parserInput.source === 'api-json' && isEmptyNimiApiPayload(parserInput.content)
+    if (parsedItems.length === 0 && !emptyNimiList) {
       crawlRun.validCount = 0
       crawlRun.insertedCount = 0
       crawlRun.duplicateCount = 0
@@ -449,12 +467,10 @@ async function crawlActiveTab(
     crawlRun.insertedCount = upserted.insertedCount
     crawlRun.duplicateCount = upserted.duplicateCount
     crawlRun.exactDuplicateCount = upserted.exactDuplicateCount
-    crawlRun.similarGroupedCount = upserted.similarGroupedCount
-    crawlRun.uniqueInsertedCount = upserted.uniqueInsertedCount
     crawlRun.rejectedCount = upserted.rejectedCount
 
     setCrawlStage(crawlRun, 'normalize')
-    const outcome = classifyCrawlOutcome({
+    const outcome = emptyNimiList ? { status: 'success' as const, errorCode: undefined } : classifyCrawlOutcome({
       parsedCount: parsedItems.length,
       validCount: upserted.validCount,
       rejectedCount: upserted.rejectedCount,
@@ -486,8 +502,6 @@ async function crawlActiveTab(
         insertedCount: upserted.insertedCount,
         duplicateCount: upserted.duplicateCount,
         exactDuplicateCount: upserted.exactDuplicateCount,
-        similarGroupedCount: upserted.similarGroupedCount,
-        uniqueInsertedCount: upserted.uniqueInsertedCount,
         rejectedCount: upserted.rejectedCount,
         status: outcome.status,
         runId,

@@ -290,6 +290,7 @@ function parseFromPackedPayload(html: string, pageUrl: string): ParsedItem[] {
 }
 
 function parseFromDomCards(html: string, pageUrl: string): ParsedItem[] {
+  html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '')
   const previewByTitle = new Map<string, string>()
 
   for (const match of html.matchAll(IMAGE_TAG_REGEX)) {
@@ -335,7 +336,7 @@ function parseFromDomCards(html: string, pageUrl: string): ParsedItem[] {
       previewImageUrl = previewByTitle.get(title.toLowerCase())
     }
 
-    if (!title || !previewImageUrl) {
+    if (!title) {
       continue
     }
 
@@ -357,17 +358,12 @@ function parseFromDomCards(html: string, pageUrl: string): ParsedItem[] {
 }
 
 export const konePornvideoHotParser: SiteParser = (html: string, pageUrl: string) => {
-  const packedItems = parseFromPackedPayload(html, pageUrl)
-
-  if (packedItems.length > 0) {
-    return packedItems
-  }
-
+  // Client navigation updates the list but can leave the initial script payload behind.
   const domItems = parseFromDomCards(html, pageUrl)
 
   if (domItems.length > 0) {
     return domItems
   }
 
-  return []
+  return parseFromPackedPayload(html, pageUrl)
 }

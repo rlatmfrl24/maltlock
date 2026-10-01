@@ -18,6 +18,28 @@ function loadNewFixture(): string {
 }
 
 describe('konePornvideoHotParser', () => {
+  it('collects the current page instead of stale initial payload after navigation', () => {
+    const html = `
+      <a href="/s/pornvideo/current?p=2&amp;mode=hot">
+        <div title="Current title"></div>
+        <img src="https://img.example.com/current.jpg" alt="Current title" />
+      </a>
+      <script>self.__next_f.push([1, '[{"id":{"__t":"u","v":"old"},"title":"Old title","preview":"https://img.example.com/old.jpg"}]']);</script>
+    `
+    const items = konePornvideoHotParser(html, 'https://kone.gg/s/pornvideo?mode=hot&p=2')
+    expect(items.map((item) => item.dedupeKey)).toEqual(['kone:path:/s/pornvideo/current'])
+  })
+
+  it('collects titled articles without a thumbnail and preserves identity across pages', () => {
+    const html = '<a href="/s/pornvideo/no-preview?p=1&amp;mode=hot"><div title="Text article"></div></a>'
+    const first = konePornvideoHotParser(html, 'https://kone.gg/s/pornvideo?mode=hot')
+    const second = konePornvideoHotParser(html.replace('p=1', 'p=2'), 'https://kone.gg/s/pornvideo?mode=hot&p=2')
+    expect(first).toHaveLength(1)
+    expect(first[0]).toMatchObject({ title: 'Text article', dedupeKey: 'kone:path:/s/pornvideo/no-preview' })
+    expect(first[0]?.previewImageUrl).toBeUndefined()
+    expect(second).toEqual(first)
+  })
+
   it('extracts preview image, url and title from kone hot listing', () => {
     const html = loadFixture()
 
@@ -69,10 +91,10 @@ describe('konePornvideoHotParser', () => {
 
     const items = konePornvideoHotParser(html, 'https://kone.gg/s/pornvideo?mode=hot')
 
-    expect(items.length).toBeGreaterThan(20)
+    expect(items).toHaveLength(33)
 
     const hasInvalidTitle = items.some((item) => !item.title.trim())
-    const hasMissingPreview = items.some((item) => !item.previewImageUrl?.startsWith('https://'))
+    const previewItems = items.filter((item) => item.previewImageUrl)
     const hasInvalidUrl = items.some(
       (item) =>
         !item.url.startsWith('https://kone.gg/s/pornvideo/') ||
@@ -83,7 +105,8 @@ describe('konePornvideoHotParser', () => {
     )
 
     expect(hasInvalidTitle).toBe(false)
-    expect(hasMissingPreview).toBe(false)
+    expect(previewItems).toHaveLength(30)
+    expect(previewItems.every((item) => item.previewImageUrl?.startsWith('https://'))).toBe(true)
     expect(hasInvalidUrl).toBe(false)
     expect(new Set(items.map((item) => item.dedupeKey)).size).toBe(items.length)
   })

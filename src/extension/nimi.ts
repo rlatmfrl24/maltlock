@@ -1,13 +1,52 @@
+import type { CrawledItem, NimiPlatform } from '../types/contracts'
+
+export const NIMI_PLATFORMS: readonly NimiPlatform[] = ['tw', 'ig', 'tt', 'bs']
+export const NIMI_PLATFORM_LABELS: Record<NimiPlatform, string> = {
+  tw: '트위터', ig: '인스타그램', tt: '틱톡', bs: '블루스카이',
+}
+
+export function isNimiPlatform(input: unknown): input is NimiPlatform {
+  return NIMI_PLATFORMS.some((platform) => platform === input)
+}
+
+export function getNimiPlatform(tabUrl: string): NimiPlatform | undefined {
+  try {
+    const url = new URL(tabUrl)
+    if (url.protocol !== 'https:' || url.port || url.username || url.password) return undefined
+    if (/^tw[123]?\.nimi\.wiki$/.test(url.hostname)) return 'tw'
+    if (!CURRENT_NIMI_HOSTS.has(url.hostname)) return undefined
+    const platform = url.pathname.split('/')[1]
+    return isNimiPlatform(platform) ? platform : undefined
+  } catch { return undefined }
+}
+
+export function getItemSourcePlatform(item: Pick<CrawledItem, 'siteId' | 'sourcePlatform' | 'url' | 'summary' | 'previewImageUrl'>): NimiPlatform | undefined {
+  if (item.siteId !== 'nimi-tw-ranking') return undefined
+  if (isNimiPlatform(item.sourcePlatform)) return item.sourcePlatform
+  for (const input of [item.summary, item.url, item.previewImageUrl]) {
+    if (!input) continue
+    try {
+      const host = new URL(input).hostname
+      const matches = (domain: string) => host === domain || host.endsWith(`.${domain}`)
+      if (['x.com', 'twitter.com', 'twimg.com'].some(matches)) return 'tw'
+      if (['instagram.com', 'cdninstagram.com'].some(matches)) return 'ig'
+      if (['tiktok.com', 'tiktokcdn.com', 'tiktokcdn-eu.com', 'tiktokcdn-us.com'].some(matches)) return 'tt'
+      if (['bsky.app', 'bsky.network', 'bsky.social'].some(matches)) return 'bs'
+    } catch { /* Old records may have no usable URL. */ }
+  }
+  return undefined
+}
+
 export type NimiView = 'ranking' | 'realtime' | 'recent'
-export type NimiPeriod = 'hourly' | 'daily' | 'weekly' | 'monthly'
-type NimiApiPeriod = 'hour' | 'day' | 'week' | 'month'
+export type NimiPeriod = 'hourly' | 'daily' | 'weekly' | 'monthly' | 'yearly'
+type NimiApiPeriod = 'hour' | 'day' | 'week' | 'month' | 'year'
 
 const ACTIVE_TAB_ELEMENT_REGEX =
   /<(?:button|a)\b[^>]*class=["'][^"']*(?:tab-active|bg-violet-500\/20)[^"']*["'][^>]*>([\s\S]*?)<\/(?:button|a)>/gi
 const ACTIVE_PERIOD_BUTTON_REGEX =
   /<button\b[^>]*class=["'][^"']*shadow-violet-500\/50[^"']*["'][^>]*>([\s\S]*?)<\/button>/gi
 const VIDEO_API_URL_REGEX = /\bvideoApiUrl\s*:\s*["']([^"']+)["']/i
-const CURRENT_NIMI_HOST = 'video.nimi.wiki'
+const CURRENT_NIMI_HOSTS = new Set(['video.nimi.wiki', 'video1.nimi.wiki'])
 const CURRENT_NIMI_API_URL = 'https://api.nimi.wiki/video'
 
 const PERIOD_BY_QUERY_VALUE: Record<string, NimiPeriod> = {
@@ -19,12 +58,15 @@ const PERIOD_BY_QUERY_VALUE: Record<string, NimiPeriod> = {
   weekly: 'weekly',
   month: 'monthly',
   monthly: 'monthly',
+  year: 'yearly',
+  yearly: 'yearly',
 }
 const API_PERIOD_BY_PERIOD: Record<NimiPeriod, NimiApiPeriod> = {
   hourly: 'hour',
   daily: 'day',
   weekly: 'week',
   monthly: 'month',
+  yearly: 'year',
 }
 
 function stripHtmlTags(input: string): string {
@@ -51,6 +93,9 @@ function getNimiViewFromTabUrl(tabUrl: string): NimiView | undefined {
       .filter(Boolean)
 
     for (const segment of segments) {
+      if (segment === 'new') {
+        return 'recent'
+      }
       if (segment === 'ranking' || segment === 'realtime' || segment === 'recent') {
         return segment
       }
@@ -134,7 +179,7 @@ function getConfiguredVideoApiUrl(html: string): string | undefined {
 
 function isCurrentNimiHost(tabUrl: string): boolean {
   try {
-    return new URL(tabUrl).hostname === CURRENT_NIMI_HOST
+    return CURRENT_NIMI_HOSTS.has(new URL(tabUrl).hostname)
   } catch {
     return false
   }
@@ -201,17 +246,23 @@ export function getNimiActivePeriod(html: string, tabUrl: string): NimiPeriod {
 }
 
 export function buildNimiApiUrl(html: string, tabUrl: string): string | undefined {
+  const platform = getNimiPlatform(tabUrl)
+  if (!platform) return undefined
   const activeView = getNimiActiveView(html, tabUrl)
   const currentApiUrl = getConfiguredVideoApiUrl(html) ??
     (isCurrentNimiHost(tabUrl) ? CURRENT_NIMI_API_URL : undefined)
 
   if (currentApiUrl) {
     if (activeView === 'ranking') {
+      const sort = new URL(tabUrl).searchParams.get('sort') === 'likes' ? 'likes' : 'plays'
+      if (sort === 'likes') {
+        return `${currentApiUrl}/${platform}/ranking?sort=likes`
+      }
       const activePeriod = getNimiActivePeriod(html, tabUrl)
-      return `${currentApiUrl}/tw/ranking/${API_PERIOD_BY_PERIOD[activePeriod]}`
+      return `${currentApiUrl}/${platform}/ranking?sort=plays&period=${API_PERIOD_BY_PERIOD[activePeriod]}`
     }
 
-    return `${currentApiUrl}/tw/${activeView}`
+    return `${currentApiUrl}/${platform}/${activeView === 'recent' ? 'new' : activeView}`
   }
 
   const legacyOrigin = getNimiApiOrigin(tabUrl)

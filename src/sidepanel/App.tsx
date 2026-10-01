@@ -7,18 +7,25 @@ import {
   type MouseEvent,
 } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { targetSites } from '../config/targets'
+import { normalizeKissjavUrl, targetSites } from '../config/targets'
 import {
   deleteCrawledItem,
-  excludeItemFromSimilarityGroup,
+  deleteCrawledItems,
+  listCrawledItemIds,
+  countCrawledItems,
   getCrawlDiagnostic,
   getItemBackfillProgress,
-  listItemCountSummariesBySite,
-  listItemGroupsBySite,
+  listItemCountsBySite,
+  listItemsBySite,
   listCrawlRunsBySite,
   runItemSignatureBackfillBatch,
 } from '../db/repository'
 import { sendRuntimeRequest } from '../extension/runtime-client'
+import { crawlRangePages } from '../extension/range-auto-crawl'
+import { crawlTwidougaPages } from '../extension/twidouga-auto-crawl'
+import { crawlNimiPlatforms } from '../extension/nimi-auto-crawl'
+import { getItemSourcePlatform, NIMI_PLATFORMS, NIMI_PLATFORM_LABELS } from '../extension/nimi'
+import type { AutoCrawlProgress } from '../extension/auto-crawl'
 import { hasConsecutiveParserFailures } from '../extension/crawl-diagnostics'
 import { decompressDiagnosticPayload } from '../extension/diagnostic-artifacts'
 import { createCrawlDiagnosticExport } from './diagnostic-export'
@@ -31,14 +38,13 @@ import {
 } from './diagnostic-settings'
 import type {
   CrawledItem,
-  ItemCountSummary,
-  ItemGroupReason,
   CrawlRun,
   CrawlErrorCode,
   CrawlSummary,
   OpenTargetSiteResult,
   OpenItemLinkResult,
   SetPrivacyScreenBlurResult,
+  NimiPlatform,
 } from '../types/contracts'
 
 type StatusKind = 'idle' | 'loading' | 'success' | 'warning' | 'error'
@@ -59,9 +65,12 @@ const DATE_TIME_FORMATTER = new Intl.DateTimeFormat('ko-KR', {
   dateStyle: 'short',
   timeStyle: 'medium',
 })
+const ITEM_DATE_FORMATTER = new Intl.DateTimeFormat('ko-KR', {
+  month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+})
 const TARGET_SITE_BY_ID = new Map(targetSites.map((site) => [site.id, site]))
-const EMPTY_COUNTS_BY_SITE: Record<string, ItemCountSummary> = Object.fromEntries(
-  targetSites.map((site) => [site.id, { itemCount: 0, groupCount: 0 }]),
+const EMPTY_COUNTS_BY_SITE: Record<string, number> = Object.fromEntries(
+  targetSites.map((site) => [site.id, 0]),
 )
 const STATUS_LABEL_BY_KIND: Record<StatusKind, string> = {
   idle: '안내',
@@ -111,6 +120,10 @@ function getInitialSiteUrls(): Record<string, string> {
       }
 
       merged[site.id] = trimmed
+      if (site.id === 'kissjav-most-popular-week') {
+        try { merged[site.id] = normalizeKissjavUrl(trimmed).href }
+        catch { /* Keep custom input for the existing URL validation. */ }
+      }
     }
 
     return merged
@@ -181,23 +194,8 @@ function getRunMetrics(run: CrawlRun): string {
     `유효 ${run.validCount ?? 0}`,
     `신규 ${run.insertedCount ?? 0}`,
     `정확 중복 ${run.exactDuplicateCount ?? run.duplicateCount ?? 0}`,
-    `유사 그룹 ${run.similarGroupedCount ?? 0}`,
-    `고유 신규 ${run.uniqueInsertedCount ?? run.insertedCount ?? 0}`,
     `탈락 ${run.rejectedCount ?? 0}`,
   ].join(' · ')
-}
-
-function getGroupReasonLabel(reason: ItemGroupReason | undefined): string {
-  switch (reason) {
-    case 'global-identity':
-      return '전역 식별자 일치'
-    case 'title-exact':
-      return '정규화 제목 일치'
-    case 'title-similar':
-      return '제목 유사'
-    default:
-      return '개별 항목'
-  }
 }
 
 function downloadJson(filename: string, value: unknown): void {
@@ -221,13 +219,27 @@ function App() {
   const [activeSiteId, setActiveSiteId] = useState(defaultSiteId)
   const [siteUrls, setSiteUrls] = useState<Record<string, string>>(getInitialSiteUrls)
   const [status, setStatus] = useState<StatusState>(DEFAULT_STATUS)
+  const [step, setStep] = useState<'target' | 'crawl' | 'list'>('target')
   const [isCrawling, setIsCrawling] = useState(false)
+  const [twidougaCrawlMode, setTwidougaCrawlMode] = useState('current')
+  const [nimiCrawlMode, setNimiCrawlMode] = useState('all')
+  const [nimiSourceFilter, setNimiSourceFilter] = useState<NimiPlatform | ''>('')
+  const activeSourceFilter = activeSiteId === 'nimi-tw-ranking' ? nimiSourceFilter || undefined : undefined
+  const [rangeCrawlSettings, setRangeCrawlSettings] = useState<Record<string, { mode: string; startPage: string; endPage: string }>>({
+    'kone-pornvideo-hot': { mode: 'current', startPage: '1', endPage: '5' },
+    'kissjav-most-popular-week': { mode: 'current', startPage: '1', endPage: '3' },
+    'missav-weekly-views': { mode: 'current', startPage: '1', endPage: '3' },
+  })
+  const activeRangeSettings = rangeCrawlSettings[activeSiteId]
+  const [isStoppingCrawl, setIsStoppingCrawl] = useState(false)
+  const autoCrawlRef = useRef<AbortController | null>(null)
   const [isPrivacyMode, setIsPrivacyMode] = useState(getInitialPrivacyMode)
   const [isTogglingPrivacyMode, setIsTogglingPrivacyMode] = useState(false)
-  const [isListExpanded, setIsListExpanded] = useState(false)
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null)
-  const [separatingItemId, setSeparatingItemId] = useState<string | null>(null)
-  const [expandedGroupIds, setExpandedGroupIds] = useState<Set<string>>(() => new Set())
+  const deleteFocusRef = useRef<{ removedId: string; nextId?: string } | null>(null)
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(() => new Set())
+  const [pendingDeletion, setPendingDeletion] = useState<{ ids: string[]; scope: string } | null>(null)
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false)
   const [captureFailurePayload, setCaptureFailurePayload] = useState(
     DEFAULT_DIAGNOSTIC_CAPTURE_ENABLED,
   )
@@ -236,6 +248,8 @@ function App() {
 
   const activeSite = useMemo(() => TARGET_SITE_BY_ID.get(activeSiteId), [activeSiteId])
   const activeSiteName = activeSite?.name ?? '-'
+
+  useEffect(() => () => autoCrawlRef.current?.abort(), [])
 
   const activeSiteUrl = useMemo(() => {
     if (!activeSite) {
@@ -281,17 +295,30 @@ function App() {
       })
   }, [])
 
-  const itemGroups = useLiveQuery(
+  const items = useLiveQuery(
     async () => {
       if (!activeSiteId) {
         return []
       }
 
-      return listItemGroupsBySite(activeSiteId, 200)
+      return listItemsBySite(activeSiteId, 200, activeSourceFilter)
     },
-    [activeSiteId],
+    [activeSiteId, activeSourceFilter],
     [],
   )
+
+  useEffect(() => {
+    const pending = deleteFocusRef.current
+    if (!pending || deletingItemId) return
+    if (pending.nextId !== pending.removedId && items.some((item) => item.id === pending.removedId)) return
+    if (step === 'list' && document.activeElement === document.body) {
+      const nextButton = pending.nextId
+        ? document.querySelector<HTMLButtonElement>(`.item-delete[data-item-id="${CSS.escape(pending.nextId)}"]`)
+        : null
+      ;(nextButton ?? document.getElementById('list-heading'))?.focus()
+    }
+    deleteFocusRef.current = null
+  }, [items, deletingItemId, step])
 
   const recentRuns = useLiveQuery(
     async () => {
@@ -304,29 +331,22 @@ function App() {
     [activeSiteId],
     [],
   )
-  const latestRun = recentRuns[0] ?? null
   const needsParserAttention = useMemo(
     () => hasConsecutiveParserFailures(recentRuns),
     [recentRuns],
   )
 
   const itemCountsBySite = useLiveQuery(
-    async () => listItemCountSummariesBySite(targetSites.map((site) => site.id)),
+    async () => listItemCountsBySite(targetSites.map((site) => site.id)),
     [],
     EMPTY_COUNTS_BY_SITE,
   )
 
-  const activeSiteCounts = activeSiteId
-    ? (itemCountsBySite[activeSiteId] ?? { itemCount: 0, groupCount: 0 })
-    : { itemCount: 0, groupCount: 0 }
-  const totalStoredItemCount = useMemo(
-    () =>
-      Object.values(itemCountsBySite).reduce(
-        (total, siteCount) => total + siteCount.itemCount,
-        0,
-      ),
-    [itemCountsBySite],
-  )
+  const activeSiteCount = itemCountsBySite[activeSiteId] ?? 0
+  const filteredCount = useLiveQuery(async () => activeSourceFilter ? countCrawledItems(activeSiteId, activeSourceFilter) : 0,
+    [activeSiteId, activeSourceFilter], 0)
+  const visibleCount = activeSourceFilter ? filteredCount : activeSiteCount
+  const totalStoredItemCount = useLiveQuery(countCrawledItems, [], 0)
 
   const backfillProgress = useLiveQuery(getItemBackfillProgress, [], undefined)
 
@@ -378,16 +398,67 @@ function App() {
       kind: 'success',
       message: `${siteName} 사이트로 현재 탭을 이동했습니다.`,
     })
+    setStep('crawl')
+  }
+
+  function handleRangeSettingChange(key: 'mode' | 'startPage' | 'endPage', value: string): void {
+    setRangeCrawlSettings((current) => ({ ...current, [activeSiteId]: { ...current[activeSiteId], [key]: value } }))
   }
 
   async function handleCrawl(): Promise<void> {
+    if (isCrawling) return
     if (!activeSiteId) {
       setStatus({ kind: 'error', message: '먼저 대상 사이트를 선택해주세요.' })
       return
     }
 
     setIsCrawling(true)
+    setIsStoppingCrawl(false)
     setStatus({ kind: 'loading', message: 'HTML 수집과 파싱을 진행 중입니다...' })
+
+    if (activeRangeSettings?.mode === 'all' ||
+      (activeSiteId === 'twidouga-ranking-t1' && twidougaCrawlMode === 'all') ||
+      (activeSiteId === 'nimi-tw-ranking' && nimiCrawlMode === 'all')) {
+      const controller = new AbortController()
+      autoCrawlRef.current = controller
+      const isKone = activeSiteId === 'kone-pornvideo-hot'
+      const isNimi = activeSiteId === 'nimi-tw-ranking'
+      const isRangeCrawl = !!activeRangeSettings
+      const pageLabel = (page: number) => isNimi ? NIMI_PLATFORM_LABELS[NIMI_PLATFORMS[page - 1]] : isRangeCrawl ? `${page}페이지` : page === 1 ? '1–10위' : '11–20위'
+      try {
+        const options = {
+          targetUrl: activeSiteUrl.trim(), captureFailurePayload, signal: controller.signal,
+          onProgress: (progress: AutoCrawlProgress) => setStatus({
+            kind: 'loading',
+            message: `${pageLabel(progress.page)} ${controller.signal.aborted ? '중지 중' : '확인 중'} · ${progress.completedPages}페이지 처리 · 신규 ${progress.insertedCount}건 저장 · 정확 중복 ${progress.duplicateCount}건`,
+          }),
+        }
+        const result = await (isNimi ? crawlNimiPlatforms({ ...options, onProgress: (progress) => setStatus({
+          kind: 'loading', message: `${pageLabel(progress.page)} 확인 중 · ${progress.completedPages}/4개 플랫폼 처리 · 신규 ${progress.insertedCount}건 저장 · 정확 중복 ${progress.duplicateCount}건${progress.failures.length ? ` · 실패 ${progress.failures.join(' · ')}` : ''}`,
+        }) }) : isRangeCrawl ? crawlRangePages({
+          ...options, siteId: activeSiteId, startPage: Number(activeRangeSettings.startPage),
+          endPage: activeRangeSettings.endPage.trim() ? Number(activeRangeSettings.endPage) : undefined,
+        }) : crawlTwidougaPages(options))
+        const successLabel = isNimi ? '4개 플랫폼 주간 수집 완료' : isRangeCrawl
+          ? isKone && activeRangeSettings.startPage === '1' && !activeRangeSettings.endPage.trim()
+            ? '전체 수집 완료' : `범위 수집 완료 (${activeRangeSettings.startPage}–${result.progress.page}페이지)`
+          : '1–20위 수집 완료'
+        const label = result.status === 'success' ?
+          successLabel
+          : result.status === 'stopped' ? '수집 중지'
+            : isNimi ? '4개 플랫폼 수집 일부 완료' : `${pageLabel(result.progress.page)}에서 ${result.progress.completedPages ? '일부 완료' : '수집 실패'}`
+        setStatus({
+          kind: result.status === 'success' ? 'success' : result.status === 'stopped' || result.progress.completedPages > 0 ? 'warning' : 'error',
+          message: `${label} · ${result.progress.completedPages}${isNimi ? '/4개 플랫폼' : '페이지'} 처리 · 신규 ${result.progress.insertedCount}건 저장 · 정확 중복 ${result.progress.duplicateCount}건${result.progress.rejectedCount ? ` · 탈락 ${result.progress.rejectedCount}건` : ''}${result.detail ? ` · ${result.detail}` : ''}`,
+        })
+        if (result.status === 'success') setStep('list')
+      } finally {
+        autoCrawlRef.current = null
+        setIsCrawling(false)
+        setIsStoppingCrawl(false)
+      }
+      return
+    }
 
     const response = await sendRuntimeRequest<CrawlSummary>({
       type: 'CRAWL_ACTIVE_TAB',
@@ -411,15 +482,16 @@ function App() {
     if (response.data.status === 'partial') {
       setStatus({
         kind: 'warning',
-        message: `${response.data.parsedCount}건 파싱, 고유 신규 ${response.data.uniqueInsertedCount}건 / 유사 그룹 ${response.data.similarGroupedCount}건 / 정확 중복 ${response.data.exactDuplicateCount}건 / 탈락 ${response.data.rejectedCount}건입니다.`,
+        message: `${response.data.parsedCount}건 파싱, 신규 ${response.data.insertedCount}건 저장 / 정확 중복 ${response.data.exactDuplicateCount}건 / 탈락 ${response.data.rejectedCount}건입니다.`,
       })
       return
     }
 
     setStatus({
       kind: 'success',
-      message: `${response.data.parsedCount}건 파싱, 고유 신규 ${response.data.uniqueInsertedCount}건 / 유사 그룹 ${response.data.similarGroupedCount}건 저장 / 정확 중복 ${response.data.exactDuplicateCount}건 제외했습니다.`,
+      message: `${response.data.parsedCount}건 파싱, 신규 ${response.data.insertedCount}건 저장 / 정확 중복 ${response.data.exactDuplicateCount}건 제외했습니다.`,
     })
+    setStep('list')
   }
 
   async function handleDiagnosticCaptureChange(enabled: boolean): Promise<void> {
@@ -498,12 +570,18 @@ function App() {
 
     try {
       await deleteCrawledItem(itemId)
+      setSelectedItemIds((previous) => {
+        const next = new Set(previous)
+        next.delete(itemId)
+        return next
+      })
       await removePersistentThumbnail(itemId)
       setStatus({
         kind: 'success',
         message: '아이템 1건을 삭제했습니다.',
       })
     } catch {
+      if (deleteFocusRef.current?.removedId === itemId) deleteFocusRef.current.nextId = itemId
       setStatus({
         kind: 'error',
         message: '아이템 삭제에 실패했습니다. 다시 시도하세요.',
@@ -513,26 +591,51 @@ function App() {
     }
   }, [])
 
-  const handleSeparateItem = useCallback(async (itemId: string): Promise<void> => {
-    setSeparatingItemId(itemId)
-    try {
-      await excludeItemFromSimilarityGroup(itemId)
-      setStatus({ kind: 'success', message: '항목을 유사 그룹에서 분리했습니다.' })
-    } catch {
-      setStatus({ kind: 'error', message: '그룹 분리에 실패했습니다.' })
-    } finally {
-      setSeparatingItemId(null)
-    }
-  }, [])
-
-  const handleToggleGroup = useCallback((groupId: string): void => {
-    setExpandedGroupIds((previous) => {
+  const handleSelectItem = useCallback((itemId: string, checked: boolean) => {
+    setSelectedItemIds((previous) => {
       const next = new Set(previous)
-      if (next.has(groupId)) next.delete(groupId)
-      else next.add(groupId)
+      if (checked) next.add(itemId)
+      else next.delete(itemId)
       return next
     })
   }, [])
+
+  async function handleSelectSiteItems(): Promise<void> {
+    try {
+      const ids = await listCrawledItemIds(activeSiteId, activeSourceFilter)
+      setSelectedItemIds((previous) => new Set([...previous, ...ids]))
+    } catch {
+      setStatus({ kind: 'error', message: '항목을 선택하지 못했습니다. 다시 시도하세요.' })
+    }
+  }
+
+  async function handlePrepareDeleteAll(): Promise<void> {
+    try {
+      const ids = await listCrawledItemIds()
+      if (ids.length) setPendingDeletion({ ids, scope: '전체 사이트' })
+    } catch {
+      setStatus({ kind: 'error', message: '삭제할 항목을 확인하지 못했습니다.' })
+    }
+  }
+
+  async function handleBulkDelete(): Promise<void> {
+    if (!pendingDeletion || isBulkDeleting) return
+    setIsBulkDeleting(true)
+    try {
+      const deletedIds = await deleteCrawledItems(pendingDeletion.ids)
+      const requestedIds = new Set(pendingDeletion.ids)
+      setSelectedItemIds((previous) => new Set([...previous].filter((id) => !requestedIds.has(id))))
+      const cleanup = await Promise.allSettled(deletedIds.map(removePersistentThumbnail))
+      const cacheFailed = cleanup.some((result) => result.status === 'rejected')
+      setStatus({ kind: cacheFailed ? 'warning' : 'success',
+        message: `항목 ${deletedIds.length}건을 일괄 삭제했습니다.${cacheFailed ? ' 일부 썸네일 캐시 정리에 실패했습니다.' : ''}` })
+      setPendingDeletion(null)
+    } catch {
+      setStatus({ kind: 'error', message: '일괄 삭제에 실패했습니다. 항목을 확인하고 다시 시도하세요.' })
+    } finally {
+      setIsBulkDeleting(false)
+    }
+  }
 
   const handleOpenItemLink = useCallback(
     async (url: string, newTab: boolean): Promise<void> => {
@@ -613,40 +716,32 @@ function App() {
   }, [])
 
   const renderedItems = useMemo(() => {
-    if (itemGroups.length === 0) {
+    if (items.length === 0) {
       return (
         <li className="empty-row">
-          <p>아직 저장된 아이템이 없습니다.</p>
-          <p>사이트를 열고 크롤을 실행하면 결과가 여기에 쌓입니다.</p>
+          <p>{activeSourceFilter ? `${NIMI_PLATFORM_LABELS[activeSourceFilter]}에 저장된 항목이 없습니다.` : '아직 저장된 항목이 없습니다.'}</p>
+          <p>{activeSourceFilter ? '다른 출처를 선택하거나 이 사이트를 수집하세요.' : '아래의 ‘이 사이트 수집’으로 항목을 추가하세요.'}</p>
         </li>
       )
     }
 
-    return itemGroups.map((group) => {
-      const item = group.representative
+    return items.map((item, index) => {
+      const sourcePlatform = getItemSourcePlatform(item)
       const titleLinkUrl = getTitleLinkUrl(item)
-      const additionalItems = group.items.filter((value) => value.id !== item.id)
-      const isExpanded = expandedGroupIds.has(group.id)
 
       return (
-        <li key={group.id} className="item-row">
+        <li key={item.id} className={`item-row${selectedItemIds.has(item.id) ? ' item-row-selected' : ''}`}>
           <div className={`item-main ${isPrivacyMode ? 'item-main-privacy' : ''}`}>
-            {!isPrivacyMode ? (
-              item.previewImageUrl ? (
-                <CachedThumbnail
-                  itemId={item.id}
-                  sourceUrl={item.previewImageUrl}
-                  title={item.title}
-                />
-              ) : (
-                <div className="item-preview item-preview-empty">No Image</div>
-              )
-            ) : null}
+            <label className="item-selection">
+              <input type="checkbox" className="item-select" aria-label={`${item.title} 선택`}
+                checked={selectedItemIds.has(item.id)} disabled={isBulkDeleting || !!pendingDeletion}
+                onChange={(event) => handleSelectItem(item.id, event.target.checked)} />
+            </label>
             <div className="item-content">
               <a
                 href={titleLinkUrl}
                 className="item-title"
-                title={item.title}
+                title={`${item.title}\n${titleLinkUrl}`}
                 onClick={(event) => {
                   handleItemLinkClick(event, titleLinkUrl)
                 }}
@@ -656,120 +751,69 @@ function App() {
               >
                 {item.title}
               </a>
-              <a
-                href={item.url}
-                className="item-url"
-                title={item.url}
-                onClick={(event) => {
-                  handleItemLinkClick(event, item.url)
-                }}
-                onAuxClick={(event) => {
-                  handleItemLinkAuxClick(event, item.url)
-                }}
-              >
-                {item.url}
-              </a>
-              <div className="item-meta">
-                <div className="item-meta-tags">
-                  <span className="meta-tag">{formatDateTime(item.crawledAt)}</span>
-                  {additionalItems.length > 0 ? (
-                    <button
-                      type="button"
-                      className="group-toggle"
-                      aria-expanded={isExpanded}
-                      onClick={() => handleToggleGroup(group.id)}
-                    >
-                      유사 {additionalItems.length}건 {isExpanded ? '접기' : '보기'}
-                    </button>
-                  ) : null}
-                </div>
-                {item.summary ? (
-                  <span className="item-summary" title={item.summary}>
-                    {item.summary}
-                  </span>
+              {item.siteId === 'nimi-tw-ranking' ? (
+                <span className="meta-tag source-platform">NimiWiki · {sourcePlatform ? NIMI_PLATFORM_LABELS[sourcePlatform] : '출처 미확인'}</span>
+              ) : null}
+              {item.summary && item.summary !== titleLinkUrl && item.summary !== item.url ? (
+                <span className="item-summary" title={item.summary}>
+                  {item.summary}
+                </span>
+              ) : null}
+              <time className="item-date" dateTime={new Date(item.crawledAt).toISOString()}
+                title={`수집: ${formatDateTime(item.crawledAt)}`} aria-label={`수집: ${formatDateTime(item.crawledAt)}`}>
+                {ITEM_DATE_FORMATTER.format(item.crawledAt)}
+              </time>
+            </div>
+            {!isPrivacyMode || titleLinkUrl !== item.url ? (
+              <div className="item-media">
+                {!isPrivacyMode ? item.previewImageUrl ? (
+                  <CachedThumbnail itemId={item.id} sourceUrl={item.previewImageUrl} title={item.title} />
+                ) : <div className="item-preview item-preview-empty">No Image</div> : null}
+                {titleLinkUrl !== item.url ? (
+                  <a href={item.url} className="item-url" title={item.url}
+                    aria-label={`${item.title} 영상 열기`}
+                    onClick={(event) => handleItemLinkClick(event, item.url)}
+                    onAuxClick={(event) => handleItemLinkAuxClick(event, item.url)}>
+                    영상 열기
+                  </a>
                 ) : null}
               </div>
-              <div className="item-actions">
-                <button
-                  type="button"
-                  className="delete-button"
-                  onClick={() => {
-                    void handleDeleteItem(item.id)
-                  }}
-                  disabled={deletingItemId === item.id}
-                >
-                  {deletingItemId === item.id ? '삭제 중...' : '삭제'}
-                </button>
-              </div>
-            </div>
+            ) : null}
+            <button type="button" className="delete-button item-delete" data-item-id={item.id}
+              aria-label={`${item.title} ${deletingItemId === item.id ? '삭제 중' : '삭제'}`}
+              aria-busy={deletingItemId === item.id}
+              onClick={(event) => {
+                if (event.detail === 0) deleteFocusRef.current = { removedId: item.id, nextId: items[index + 1]?.id ?? items[index - 1]?.id }
+                void handleDeleteItem(item.id)
+              }}
+              disabled={!!deletingItemId || isBulkDeleting || !!pendingDeletion}>
+              {deletingItemId !== item.id ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                  <path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6" />
+                </svg>
+              ) : null}
+              <span>{deletingItemId === item.id ? '삭제 중' : '삭제'}</span>
+            </button>
           </div>
-          {isExpanded ? (
-            <ul className="group-members">
-              {additionalItems.map((member) => {
-                const memberLinkUrl = getTitleLinkUrl(member)
-                const siteName = TARGET_SITE_BY_ID.get(member.siteId)?.name ?? member.siteId
-                return (
-                  <li key={member.id} className="group-member">
-                    <div className="group-member-heading">
-                      <a
-                        href={memberLinkUrl}
-                        className="group-member-title"
-                        onClick={(event) => handleItemLinkClick(event, memberLinkUrl)}
-                        onAuxClick={(event) => handleItemLinkAuxClick(event, memberLinkUrl)}
-                      >
-                        {member.title}
-                      </a>
-                      <span className="group-source">{siteName}</span>
-                    </div>
-                    <p className="group-match-reason">
-                      {getGroupReasonLabel(member.groupReason ?? group.reason)}
-                      {member.groupScore !== undefined
-                        ? ` · ${(member.groupScore * 100).toFixed(1)}%`
-                        : ''}
-                    </p>
-                    <div className="group-member-actions">
-                      {group.reason !== 'global-identity' ? (
-                        <button
-                          type="button"
-                          className="separate-button"
-                          onClick={() => void handleSeparateItem(member.id)}
-                          disabled={separatingItemId === member.id}
-                        >
-                          {separatingItemId === member.id ? '분리 중...' : '그룹에서 분리'}
-                        </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        className="delete-button"
-                        onClick={() => void handleDeleteItem(member.id)}
-                        disabled={deletingItemId === member.id}
-                      >
-                        {deletingItemId === member.id ? '삭제 중...' : '삭제'}
-                      </button>
-                    </div>
-                  </li>
-                )
-              })}
-            </ul>
-          ) : null}
         </li>
       )
     })
   }, [
     deletingItemId,
-    expandedGroupIds,
     handleDeleteItem,
+    handleSelectItem,
     handleItemLinkAuxClick,
     handleItemLinkClick,
-    handleSeparateItem,
-    handleToggleGroup,
     isPrivacyMode,
-    itemGroups,
-    separatingItemId,
+    items,
+    selectedItemIds,
+    isBulkDeleting,
+    pendingDeletion,
+    activeSourceFilter,
   ])
 
   return (
-    <main className={`panel-shell ${isListExpanded ? 'panel-shell-list-expanded' : ''}`}>
+    <main className="panel-shell">
       <header className="panel-header">
         <div className="panel-header-top">
           <div className="brand-lockup">
@@ -781,22 +825,29 @@ function App() {
             />
             <h1>Maltlock Crawler</h1>
           </div>
-          <span className="header-badge">Side Panel</span>
-        </div>
-        <p className="panel-subtitle">현재 탭 이동 → 크롤 실행 → 저장 결과 검토</p>
-        <div className="header-meta">
-          <span className="meta-pill">선택: {activeSiteName}</span>
-          <span className="meta-pill">
-            선택 사이트: {activeSiteCounts.groupCount}그룹 / {activeSiteCounts.itemCount}건
-          </span>
-          <span className="meta-pill">전체 저장: {totalStoredItemCount}건</span>
+          <button type="button" className={`privacy-toggle ${isPrivacyMode ? 'privacy-toggle-on' : ''}`}
+            aria-pressed={isPrivacyMode} disabled={isTogglingPrivacyMode}
+            onClick={() => void handleTogglePrivacyMode()}>
+            {isTogglingPrivacyMode ? '적용 중...' : `사생활 모드 ${isPrivacyMode ? 'ON' : 'OFF'}`}
+          </button>
         </div>
       </header>
 
-      <section className="section-block">
+      <nav className="step-nav" aria-label="수집 단계">
+        {([['target', '대상 선택'], ['crawl', '수집 실행'], ['list', '저장 목록']] as const).map(([value, label], index) => (
+          <button key={value} type="button" aria-current={step === value ? 'step' : undefined}
+            aria-controls={`step-${value}`} onClick={() => setStep(value)}>
+            <span className="step-number">{index + 1}</span>{label}
+            {value === 'crawl' && isCrawling ? <span className="running-dot" aria-label="수집 진행 중" /> : null}
+          </button>
+        ))}
+      </nav>
+
+      <div className="step-body">
+      <section id="step-target" className="section-block step-page" hidden={step !== 'target'} aria-labelledby="target-heading">
         <div className="section-heading">
-          <h2>1. 대상 사이트</h2>
-          <p>버튼을 누르면 현재 활성 탭을 해당 사이트로 이동하고 현재 대상으로 설정합니다.</p>
+          <h2 id="target-heading">어디에서 수집할까요?</h2>
+          <p>사이트를 선택하면 현재 탭에서 열고 수집 설정으로 이동합니다.</p>
         </div>
         <div className="site-grid">
           {targetSites.map((site) => (
@@ -805,19 +856,21 @@ function App() {
               type="button"
               className={`chip ${activeSiteId === site.id ? 'chip-active' : ''}`}
               aria-pressed={activeSiteId === site.id}
+              disabled={isCrawling}
               onClick={() => {
                 void handleOpenSite(site.id)
               }}
             >
               <span className="chip-label">{site.name}</span>
               <span className="chip-count">
-                {itemCountsBySite[site.id]?.groupCount ?? 0} /{' '}
-                {itemCountsBySite[site.id]?.itemCount ?? 0}
+                {itemCountsBySite[site.id] ?? 0}건
               </span>
             </button>
           ))}
         </div>
         {activeSite ? (
+          <details className="site-settings">
+            <summary>사이트 주소 설정 <span>{activeSiteName}</span></summary>
           <div className="site-url-editor">
             <label className="site-url-label" htmlFor="site-url-input">
               {activeSite.name} URL 커스터마이즈
@@ -828,6 +881,7 @@ function App() {
                 type="url"
                 className="site-url-input"
                 value={activeSiteUrl}
+                disabled={isCrawling}
                 onChange={(event) => {
                   handleSiteUrlChange(activeSite.id, event.target.value)
                 }}
@@ -837,6 +891,7 @@ function App() {
               <button
                 type="button"
                 className="site-url-reset"
+                disabled={isCrawling}
                 onClick={() => {
                   handleResetSiteUrl(activeSite.id)
                 }}
@@ -845,32 +900,71 @@ function App() {
               </button>
             </div>
           </div>
+          </details>
         ) : null}
+        <div className="target-library">
+          <span>이미 저장한 항목이 있나요?</span>
+          <button type="button" className="text-button" onClick={() => setStep('list')}>저장 목록 바로 보기</button>
+        </div>
       </section>
 
-      <section className="section-block">
+      <section id="step-crawl" className="section-block step-page" hidden={step !== 'crawl'} aria-labelledby="crawl-heading">
         <div className="section-heading">
-          <h2>2. 크롤 실행</h2>
-          <p>활성 탭의 HTML을 수집해 파싱 후 로컬 DB에 저장합니다.</p>
+          <h2 id="crawl-heading">{activeSiteName} 수집</h2>
+          <p>범위를 확인하고 수집을 시작하세요. 결과는 페이지마다 저장합니다.</p>
         </div>
-        <button
-          type="button"
-          className="crawl-button"
-          onClick={() => {
-            void handleCrawl()
-          }}
-          disabled={isCrawling}
-        >
-          {isCrawling ? '크롤링 중...' : '지금 크롤 실행'}
-        </button>
-        <p
-          className={`status-line status-${status.kind}`}
-          role="status"
-          aria-live="polite"
-        >
-          <span className="status-label">{STATUS_LABEL_BY_KIND[status.kind]}</span>
-          <span>{status.message}</span>
-        </p>
+        <div className="source-summary">
+          <span title={activeSiteUrl}>{activeSiteUrl}</span>
+          <button type="button" className="text-button" disabled={isCrawling}
+            onClick={() => setStep('target')}>대상 변경</button>
+        </div>
+        {activeRangeSettings ? (
+          <div className="site-url-editor">
+            <label className="site-url-label" htmlFor="range-crawl-mode">{activeSiteId === 'kone-pornvideo-hot' ? '코네' : activeSiteName} 수집 범위</label>
+            <select id="range-crawl-mode" className="site-url-input" value={activeRangeSettings.mode}
+              disabled={isCrawling} onChange={(event) => handleRangeSettingChange('mode', event.target.value)}>
+              <option value="current">현재 페이지</option>
+              <option value="all">{activeSiteId === 'kone-pornvideo-hot' ? '인기글 페이지 범위 자동 수집' : '페이지 범위 자동 수집'}</option>
+            </select>
+            {activeRangeSettings.mode === 'all' ? (
+              <>
+                <div className="crawl-range">
+                  <label>시작 페이지<input type="number" min="1" step="1" className="site-url-input"
+                    value={activeRangeSettings.startPage} disabled={isCrawling} onChange={(event) => handleRangeSettingChange('startPage', event.target.value)} /></label>
+                  <label>끝 페이지<input type="number" min={Number(activeRangeSettings.startPage) || 1} step="1" className="site-url-input"
+                    value={activeRangeSettings.endPage} placeholder={activeSiteId === 'kone-pornvideo-hot' ? '마지막 페이지' : '필수'}
+                    disabled={isCrawling} onChange={(event) => handleRangeSettingChange('endPage', event.target.value)} /></label>
+                </div>
+                <p className="crawl-hint">지정 범위를 모두 확인합니다. {activeSiteId === 'kone-pornvideo-hot' ? '끝 페이지를 비우면 마지막까지 수집합니다. ' : '정렬을 유지하며 순회합니다. '}
+                  패널과 {activeSiteName} 탭을 열어 두세요.</p>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+        {activeSiteId === 'twidouga-ranking-t1' ? (
+          <div className="site-url-editor">
+            <label className="site-url-label" htmlFor="twidouga-crawl-mode">TwiDouga 수집 범위</label>
+            <select id="twidouga-crawl-mode" className="site-url-input" value={twidougaCrawlMode}
+              disabled={isCrawling} onChange={(event) => setTwidougaCrawlMode(event.target.value)}>
+              <option value="current">현재 페이지</option>
+              <option value="all">1–20위 자동 수집</option>
+            </select>
+            {twidougaCrawlMode === 'all' ? (
+              <p className="crawl-hint">24시간 랭킹의 1–10위와 11–20위를 차례로 확인합니다. 패널과 TwiDouga 탭을 열어 두세요.</p>
+            ) : null}
+          </div>
+        ) : null}
+        {activeSiteId === 'nimi-tw-ranking' ? (
+          <div className="site-url-editor">
+            <label className="site-url-label" htmlFor="nimi-crawl-mode">NimiWiki 수집 범위</label>
+            <select id="nimi-crawl-mode" className="site-url-input" value={nimiCrawlMode} disabled={isCrawling}
+              onChange={(event) => setNimiCrawlMode(event.target.value)}>
+              <option value="all">4개 플랫폼 주간 인기 자동 수집</option>
+              <option value="current">현재 목록 수집</option>
+            </select>
+            {nimiCrawlMode === 'all' ? <p className="crawl-hint">트위터 → 인스타그램 → 틱톡 → 블루스카이의 조회수 기준 주간 인기 목록을 순환합니다. 패널과 NimiWiki 탭을 열어 두세요.</p> : null}
+          </div>
+        ) : null}
         <details className="diagnostics-panel">
           <summary>
             <span>실행 진단</span>
@@ -942,46 +1036,100 @@ function App() {
         </details>
       </section>
 
-      <section className="section-block list-block">
+      <section id="step-list" className="section-block list-block" hidden={step !== 'list'} aria-labelledby="list-heading">
         <div className="list-header">
           <div className="section-heading">
-            <h2>3. 저장 리스트</h2>
-            <p>최근 수집 결과를 확인하고 필요 없는 아이템을 정리하세요.</p>
+            <h2 id="list-heading" tabIndex={-1}>저장 목록</h2>
+            <p>{visibleCount}건</p>
           </div>
           <div className="list-controls">
-            <button
-              type="button"
-              className="list-expand-toggle"
-              aria-pressed={isListExpanded}
-              onClick={() => {
-                setIsListExpanded((previousValue) => !previousValue)
-              }}
-            >
-              {isListExpanded ? '기본 보기' : '리스트 크게 보기'}
-            </button>
-            <button
-              type="button"
-              className={`privacy-toggle ${isPrivacyMode ? 'privacy-toggle-on' : ''}`}
-              aria-pressed={isPrivacyMode}
-              onClick={() => {
-                void handleTogglePrivacyMode()
-              }}
-              disabled={isTogglingPrivacyMode}
-            >
-              {isTogglingPrivacyMode
-                ? '사생활 모드 적용 중...'
-                : `사생활 모드 ${isPrivacyMode ? 'ON' : 'OFF'}`}
-            </button>
+            <select aria-label="목록 사이트" className="site-url-input" value={activeSiteId} disabled={isCrawling || isBulkDeleting}
+              onChange={(event) => setActiveSiteId(event.target.value)}>
+              {targetSites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
+            </select>
+            {activeSiteId === 'nimi-tw-ranking' ? <select aria-label="NimiWiki 출처 필터" className="site-url-input"
+              value={nimiSourceFilter} disabled={isBulkDeleting} onChange={(event) => setNimiSourceFilter(event.target.value as NimiPlatform | '')}>
+              <option value="">전체 출처</option>
+              {NIMI_PLATFORMS.map((platform) => <option key={platform} value={platform}>{NIMI_PLATFORM_LABELS[platform]}</option>)}
+            </select> : null}
           </div>
+          <details className="list-menu">
+            <summary aria-label="목록 관리 메뉴">더보기</summary>
+            <div className="list-menu-body">
+              <button type="button" className="delete-button" disabled={!totalStoredItemCount || isCrawling || isBulkDeleting || !!pendingDeletion || !!deletingItemId}
+                onClick={() => void handlePrepareDeleteAll()}>전체 사이트 항목 삭제</button>
+            </div>
+          </details>
         </div>
-        <p className="run-meta">
-          {latestRun
-            ? `최근 실행: ${formatDateTime(latestRun.finishedAt)} · ${getRunStatusLabel(latestRun)}`
-            : '최근 실행 기록이 없습니다.'}
-        </p>
+
+        <div className="bulk-actions">
+          <span>선택 {selectedItemIds.size}건</span>
+          <button type="button" className="site-url-reset" disabled={!visibleCount || isBulkDeleting || !!pendingDeletion}
+            aria-label={activeSourceFilter ? '현재 출처 전체 선택' : '현재 사이트 전체 선택'} onClick={() => void handleSelectSiteItems()}>전체 선택</button>
+          <button type="button" className="text-button" disabled={!selectedItemIds.size || isBulkDeleting || !!pendingDeletion}
+            onClick={() => setSelectedItemIds(new Set())}>선택 해제</button>
+          <button type="button" className="delete-button" disabled={!selectedItemIds.size || isCrawling || isBulkDeleting || !!pendingDeletion || !!deletingItemId}
+            onClick={() => setPendingDeletion({ ids: [...selectedItemIds], scope: '선택한 항목' })}>선택 삭제</button>
+        </div>
 
         <ul className="item-list">{renderedItems}</ul>
+        <div className="list-footer">
+          <span>{visibleCount > items.length ? `${items.length} / ${visibleCount}건 표시` : `전체 저장: ${totalStoredItemCount}건`}</span>
+          <button type="button" className="text-button" disabled={isCrawling || isBulkDeleting}
+            onClick={() => void handleOpenSite(activeSiteId)}>이 사이트 수집</button>
+        </div>
       </section>
+      </div>
+
+      <footer className="workflow-footer">
+        {status.kind !== 'idle' && step === 'list' ? (
+          <details className="status-disclosure">
+            <summary><span className={`status-line status-${status.kind}`} role="status" aria-live="polite">
+              <span className="status-label">{STATUS_LABEL_BY_KIND[status.kind]}</span>
+              <span className="status-preview">{status.message}</span>
+            </span></summary>
+            <p>{status.message}</p>
+          </details>
+        ) : status.kind !== 'idle' ? (
+          <p className={`status-line status-${status.kind}`} role="status" aria-live="polite">
+            <span className="status-label">{STATUS_LABEL_BY_KIND[status.kind]}</span><span>{status.message}</span>
+          </p>
+        ) : null}
+        {isCrawling && autoCrawlRef.current ? (
+          <button type="button" className="crawl-button crawl-stop" disabled={isStoppingCrawl}
+            onClick={() => { setIsStoppingCrawl(true); autoCrawlRef.current?.abort() }}>
+            {isStoppingCrawl ? '현재 페이지 처리 후 중지 중...' : '자동 수집 중지'}
+          </button>
+        ) : null}
+        {step === 'target' ? (
+          <button type="button" className="crawl-button" disabled={isCrawling || isBulkDeleting}
+            onClick={() => void handleOpenSite(activeSiteId)}>사이트 열고 다음</button>
+        ) : step === 'crawl' ? (
+          <div className="step-actions">
+            <button type="button" className="crawl-button" disabled={isCrawling || isBulkDeleting || !!pendingDeletion}
+              onClick={() => void handleCrawl()}>{isCrawling ? '크롤링 중...' : '지금 크롤 실행'}</button>
+            <button type="button" className="site-url-reset" onClick={() => setStep('list')}>저장 목록 보기</button>
+          </div>
+        ) : null}
+      </footer>
+      {pendingDeletion ? (
+        <dialog className="delete-dialog" aria-labelledby="bulk-delete-title"
+          ref={(dialog) => { if (dialog && !dialog.open) dialog.showModal() }}
+          onCancel={(event) => {
+            if (isBulkDeleting) event.preventDefault()
+            else setPendingDeletion(null)
+          }}>
+          <h2 id="bulk-delete-title">일괄 삭제 확인</h2>
+          <p>{pendingDeletion.scope} {pendingDeletion.ids.length}건을 삭제합니다. 이 작업은 되돌릴 수 없습니다.</p>
+          <p>수집 기록은 유지되므로 다시 크롤해도 삭제한 항목은 자동으로 복원되지 않습니다.</p>
+          <div className="bulk-actions">
+            <button type="button" className="site-url-reset" autoFocus disabled={isBulkDeleting}
+              onClick={() => setPendingDeletion(null)}>취소</button>
+            <button type="button" className="delete-button" disabled={isBulkDeleting}
+              onClick={() => void handleBulkDelete()}>{isBulkDeleting ? '삭제 중...' : `${pendingDeletion.ids.length}건 삭제`}</button>
+          </div>
+        </dialog>
+      ) : null}
     </main>
   )
 }

@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { buildNimiApiUrl, getNimiActivePeriod, getNimiActiveView } from './nimi'
+import { buildNimiApiUrl, getNimiActivePeriod, getNimiActiveView, getItemSourcePlatform, getNimiPlatform } from './nimi'
 
 describe('nimi helper', () => {
+  it('resolves all four platform routes and infers legacy sources without trusting lookalike hosts', () => {
+    for (const [platform, host] of [['tw', 'video.twimg.com'], ['ig', 'scontent.cdninstagram.com'], ['tt', 'v19.tiktokcdn.com'], ['bs', 'video.bsky.app']] as const) {
+      for (const route of ['ranking?sort=plays&period=week', 'ranking?sort=likes', 'new', 'realtime']) {
+        expect(buildNimiApiUrl('', `https://video1.nimi.wiki/${platform}/${route}`)).toBe(`https://api.nimi.wiki/video/${platform}/${route}`)
+      }
+      expect(getItemSourcePlatform({ siteId: 'nimi-tw-ranking', url: `https://${host}/media` })).toBe(platform)
+      expect(getItemSourcePlatform({ siteId: 'nimi-tw-ranking', url: `https://${host}.evil.test/media` })).toBeUndefined()
+    }
+    expect(getNimiPlatform('https://video1.nimi.wiki/unknown/ranking')).toBeUndefined()
+    expect(getNimiPlatform('https://video1.nimi.wiki.evil.test/ig/ranking')).toBeUndefined()
+    expect(getItemSourcePlatform({ siteId: 'nimi-tw-ranking', url: 'https://unknown.test/media' })).toBeUndefined()
+  })
   it('builds the separated video api url from the current Nuxt config', () => {
     const html = `
       <script>
@@ -11,13 +23,13 @@ describe('nimi helper', () => {
 
     expect(
       buildNimiApiUrl(html, 'https://video.nimi.wiki/tw/ranking/week'),
-    ).toBe('https://api.nimi.wiki/video/tw/ranking/week')
+    ).toBe('https://api.nimi.wiki/video/tw/ranking?sort=plays&period=week')
   })
 
   it('uses the known current api when the runtime config is absent', () => {
     expect(
       buildNimiApiUrl('', 'https://video.nimi.wiki/tw/ranking/day'),
-    ).toBe('https://api.nimi.wiki/video/tw/ranking/day')
+    ).toBe('https://api.nimi.wiki/video/tw/ranking?sort=plays&period=day')
   })
 
   it('does not accept a video api url outside the NimiWiki domain', () => {
@@ -29,7 +41,26 @@ describe('nimi helper', () => {
 
     expect(
       buildNimiApiUrl(html, 'https://video.nimi.wiki/tw/ranking/week'),
-    ).toBe('https://api.nimi.wiki/video/tw/ranking/week')
+    ).toBe('https://api.nimi.wiki/video/tw/ranking?sort=plays&period=week')
+  })
+
+  it.each([
+    ['ranking?sort=plays&period=week', 'ranking?sort=plays&period=week'],
+    ['ranking?sort=likes', 'ranking?sort=likes'],
+    ['ranking?sort=plays&period=year', 'ranking?sort=plays&period=year'],
+    ['ranking', 'ranking?sort=plays&period=hour'],
+    ['new', 'new'],
+    ['recent', 'new'],
+    ['realtime', 'realtime'],
+  ])('uses the current API route for video1 /tw/%s', (route, expected) => {
+    expect(buildNimiApiUrl('', `https://video1.nimi.wiki/tw/${route}`))
+      .toBe(`https://api.nimi.wiki/video/tw/${expected}`)
+  })
+
+  it('uses the diagnostic page config with query-based ranking', () => {
+    const html = '<script>window.__NUXT__.config={public:{videoApiUrl:"https://api.nimi.wiki/video"}}</script>'
+    expect(buildNimiApiUrl(html, 'https://video1.nimi.wiki/tw/ranking?sort=plays&period=week'))
+      .toBe('https://api.nimi.wiki/video/tw/ranking?sort=plays&period=week')
   })
 
   it('builds the current ranking api url from active tab and period markup', () => {

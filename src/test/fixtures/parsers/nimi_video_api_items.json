@@ -1,0 +1,55 @@
+{
+  "items": [
+    {
+      "id": "01a0697d-dba6-78d4-ab4c-b7aea832cb38",
+      "thumbnail_url": "https://pbs.twimg.com/amplify_video_thumb/2095443549630386176/img/Kyw2MTBVbQcMLzmT.jpg?name=orig",
+      "file_url": "https://video.twimg.com/amplify_video/2095443549630386176/vid/avc1/1080x1080/FFMKv9-KMDNBWVM4.mp4?tag=29",
+      "hls_url": "https://video.twimg.com/amplify_video/2095443549630386176/pl/L-AVVDRPh4u6at_Q.m3u8?tag=29",
+      "duration": 983,
+      "platform": "tw",
+      "posts": [
+        {
+          "id": "01a0697d-dba1-7a73-a072-668c3d54c399",
+          "url": "https://x.com/i/status/2095586436263403649",
+          "author": {
+            "id": "01a0656c-d8ef-7732-a704-b87e5e660eb8",
+            "url": "https://x.com/korean__11",
+            "handle": "korean__11",
+            "name": "Korean Girl Video"
+          },
+          "posted_at": "2026-09-03T18:55:15Z"
+        }
+      ],
+      "created_at": "2026-09-03T22:57:31.036508Z",
+      "up": 33,
+      "down": 17,
+      "play_count": 33130
+    },
+    {
+      "id": "01a06ff6-333c-78ab-8047-3d3f6ca52ba4",
+      "thumbnail_url": "https://pbs.twimg.com/amplify_video_thumb/2090007889511641088/img/YzvO-QvLSVA0tntf.jpg?name=orig",
+      "file_url": "https://video.twimg.com/amplify_video/2090007889511641088/vid/avc1/1272x720/vnPIhMuakL024FQM.mp4?tag=29",
+      "hls_url": "https://video.twimg.com/amplify_video/2090007889511641088/pl/LQAZ10-4JxJYx3ZB.m3u8?tag=29",
+      "duration": 912,
+      "platform": "tw",
+      "posts": [
+        {
+          "id": "01a06ff6-333b-74be-9356-f18793ee806f",
+          "url": "https://x.com/i/status/2095998362239869058",
+          "author": {
+            "id": "01a06ff6-3339-7463-9e85-d874cbd7d57f",
+            "url": "https://x.com/korea123412",
+            "handle": "korea123412",
+            "name": "탱덩이"
+          },
+          "posted_at": "2026-09-04T22:12:05Z"
+        }
+      ],
+      "created_at": "2026-09-05T05:06:41.081032Z",
+      "up": 16,
+      "down": 5,
+      "play_count": 30508
+    }
+  ],
+  "refreshed_at": "2026-09-08T21:01:01.613799Z"
+}

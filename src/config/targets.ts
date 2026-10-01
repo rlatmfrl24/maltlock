@@ -4,8 +4,8 @@ export const targetSites: TargetSite[] = [
   {
     id: "kissjav-most-popular-week",
     name: "KissJAV",
-    url: "https://kissjav.com/most-popular/?sort_by=video_viewed_week",
-    matchPatterns: ["https://kissjav.com/*"],
+    url: "https://kissjav.li/most-popular/?sort_by=video_viewed_week",
+    matchPatterns: ["https://kissjav.li/*", "https://kissjav.com/*"],
     parserId: "kissjav-most-popular-week",
   },
   {
@@ -25,8 +25,9 @@ export const targetSites: TargetSite[] = [
   {
     id: "nimi-tw-ranking",
     name: "NimiWiki",
-    url: "https://video.nimi.wiki/tw/ranking/week",
+    url: "https://video1.nimi.wiki/tw/ranking?sort=plays&period=week",
     matchPatterns: [
+      "https://video1.nimi.wiki/*",
       "https://video.nimi.wiki/*",
       "https://tw.nimi.wiki/*",
       "https://tw1.nimi.wiki/*",
@@ -105,4 +106,14 @@ export function siteMatchesUrl(
   return site.matchPatterns.some((pattern) =>
     getPatternRegex(pattern).test(url),
   );
+}
+
+export function normalizeKissjavUrl(input: string): URL {
+  const url = new URL(input);
+  const site = getTargetSiteById("kissjav-most-popular-week")!;
+  if (!siteMatchesUrl(site, url.href)) {
+    throw new Error(`지원하지 않는 KissJAV 주소입니다: ${url.origin}`);
+  }
+  url.hostname = new URL(site.url).hostname;
+  return url;
 }

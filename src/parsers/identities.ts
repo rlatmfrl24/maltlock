@@ -1,5 +1,5 @@
 import type { ItemIdentity } from '../types/contracts'
-import { extractContentCodes } from '../db/item-similarity'
+import { extractContentCodes } from '../db/item-identities'
 
 const TWITTER_MEDIA_REGEX =
   /\/(?:amplify_video|ext_tw_video|amplify_video_thumb|ext_tw_video_thumb)\/(\d+)(?:\/|$)/i

@@ -43,7 +43,10 @@ export interface ParsedItem {
   summary?: string
   price?: number
   rawHtmlSnippet?: string
+  sourcePlatform?: NimiPlatform
 }
+
+export type NimiPlatform = 'tw' | 'ig' | 'tt' | 'bs'
 
 export interface CrawledItem {
   id: string
@@ -57,11 +60,13 @@ export interface CrawledItem {
   crawledAt: number
   dedupeKey?: string
   identities?: ItemIdentity[]
+  /** 과거 저장 데이터 호환용이며, 새 항목에는 유사 그룹 정보를 생성하지 않습니다. */
   normalizedTitle?: string
   contentGroupId?: string
   groupReason?: ItemGroupReason
   groupScore?: number
   similarityExcluded?: boolean
+  sourcePlatform?: NimiPlatform
 }
 
 export type ItemIdentityKind =
@@ -95,19 +100,6 @@ export interface AppMeta {
   updatedAt: number
 }
 
-export interface ItemGroup {
-  id: string
-  representative: CrawledItem
-  items: CrawledItem[]
-  reason?: ItemGroupReason
-  score?: number
-}
-
-export interface ItemCountSummary {
-  itemCount: number
-  groupCount: number
-}
-
 export interface CrawledItemLog {
   id: string
   siteId: string
@@ -136,6 +128,7 @@ export interface CrawlRun {
   insertedCount?: number
   duplicateCount?: number
   exactDuplicateCount?: number
+  /** 과거 실행 기록 호환용입니다. */
   similarGroupedCount?: number
   uniqueInsertedCount?: number
   rejectedCount?: number
@@ -174,6 +167,10 @@ export interface CrawlActiveTabPayload {
   siteId: string
   targetUrl?: string
   captureFailurePayload?: boolean
+  tabId?: number
+  expectedTabUrl?: string
+  expectedDocumentId?: string
+  expectedKissjavPage?: number
 }
 
 export interface SetPrivacyScreenBlurPayload {
@@ -251,8 +248,6 @@ export interface CrawlSummary {
   insertedCount: number
   duplicateCount: number
   exactDuplicateCount: number
-  similarGroupedCount: number
-  uniqueInsertedCount: number
   rejectedCount: number
   status: 'success' | 'partial'
   runId: string
@@ -289,6 +284,8 @@ export interface CollectHtmlResponse {
   documentTitle: string
   readyState: PageReadyState
   bodyTextLength: number
+  kissjavPage?: number
+  kissjavReady?: boolean
 }
 
 export type SiteParser = (html: string, pageUrl: string) => ParsedItem[]

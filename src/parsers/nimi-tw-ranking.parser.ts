@@ -1,6 +1,8 @@
 import type { ParsedItem, SiteParser } from '../types/contracts'
 import { cleanText, decodeHtmlEntities, toAbsoluteUrl } from './utils'
 import { twitterMediaIdentities } from './identities'
+import { getNimiPlatform, isNimiPlatform } from '../extension/nimi'
+import type { NimiPlatform } from '../types/contracts'
 
 const VIDEO_SRC_REGEX = /https?:\/\/video\.twimg\.com\/[^"'\\s<]+/i
 const STATUS_URL_REGEX =
@@ -37,6 +39,7 @@ interface NimiApiPost {
 }
 
 interface NimiApiVideo {
+  platform?: string | null
   video_id?: string | number | null
   id?: string | number | null
   title?: string | null
@@ -51,6 +54,8 @@ interface NimiApiVideo {
 
 interface NimiApiResponse {
   success?: boolean
+  error?: unknown
+  items?: NimiApiVideo[]
   data?: NimiApiVideo[]
 }
 
@@ -199,6 +204,7 @@ function dedupeRankedItems(items: RankedParsedItem[]): ParsedItem[] {
       summary: item.summary,
       price: item.price,
       rawHtmlSnippet: item.rawHtmlSnippet,
+      sourcePlatform: item.sourcePlatform,
     }))
 }
 
@@ -234,6 +240,26 @@ function extractFirstStatusUrl(posts: NimiApiPost[] | null | undefined): string 
   return undefined
 }
 
+function extractFirstPostUrl(posts: NimiApiPost[] | null | undefined, platform: NimiPlatform): string | undefined {
+  if (platform === 'tw') return extractFirstStatusUrl(posts)
+  for (const post of posts ?? []) {
+    if (!post.url) continue
+    try {
+      const url = new URL(post.url)
+      if (url.protocol !== 'https:' || url.port || url.username || url.password) continue
+      const host = url.hostname.replace(/^www\./, '')
+      const valid = platform === 'ig' ? host === 'instagram.com' && /^\/(?:p|reel|tv)\/[^/]+\/?$/.test(url.pathname)
+        : platform === 'tt' ? host === 'tiktok.com' && /^\/@[^/]+\/video\/\d+\/?$/.test(url.pathname)
+          : host === 'bsky.app' && /^\/profile\/[^/]+\/post\/[^/]+\/?$/.test(url.pathname)
+      if (!valid) continue
+      url.search = ''
+      url.hash = ''
+      return url.href
+    } catch { /* Ignore malformed original links, never invent a tweet URL. */ }
+  }
+  return undefined
+}
+
 function toRankOrder(input: number | string | null | undefined, fallback: number): number {
   const parsedRank = Number.parseInt(`${input ?? ''}`, 10)
 
@@ -257,11 +283,24 @@ function extractApiVideos(payload: NimiApiPayload): NimiApiVideo[] | undefined {
     return payload
   }
 
+  if (!payload || typeof payload !== 'object' || payload.success === false || payload.error) return undefined
+
+  if (Array.isArray(payload.items)) {
+    return payload.items
+  }
+
   if (Array.isArray(payload.data)) {
     return payload.data
   }
 
   return undefined
+}
+
+export function isEmptyNimiApiPayload(input: string): boolean {
+  try {
+    const payload = JSON.parse(input) as NimiApiPayload
+    return extractApiVideos(payload)?.length === 0
+  } catch { return false }
 }
 
 function deriveApiTitle(video: NimiApiVideo): string | undefined {
@@ -305,13 +344,19 @@ function parseApiPayload(input: string, pageUrl: string): ParsedItem[] | undefin
   const videos = extractApiVideos(parsedPayload)
 
   if (!Array.isArray(videos)) {
-    return undefined
+    throw new Error('NimiWiki API 목록 응답 형식이 올바르지 않습니다.')
   }
+
+  const platform = getNimiPlatform(pageUrl)
+  if (!platform) throw new Error('NimiWiki 플랫폼을 확인하지 못했습니다.')
 
   const parsedItems: RankedParsedItem[] = []
   let entryIndex = 0
 
   for (const video of videos) {
+    if (!video || (video.platform != null && (!isNimiPlatform(video.platform) || video.platform !== platform))) {
+      throw new Error('NimiWiki API의 플랫폼이 수집한 목록과 다릅니다.')
+    }
     const rawVideoUrl = [video.file_url, video.direct_url, video.hls_url]
       .map((value) => `${value ?? ''}`.trim())
       .find(Boolean)
@@ -328,9 +373,10 @@ function parseApiPayload(input: string, pageUrl: string): ParsedItem[] | undefin
     const normalizedPreviewImageUrl = rawPreviewImageUrl
       ? toAbsoluteUrl(rawPreviewImageUrl, pageUrl)
       : undefined
-    const normalizedStatusUrl = extractFirstStatusUrl(video.posts)
+    const normalizedStatusUrl = extractFirstPostUrl(video.posts, platform)
     const explicitVideoId =
-      `${video.video_id ?? video.id ?? ''}`.trim() || undefined
+      `${(platform === 'tw' ? video.video_id ?? video.id : video.id) ?? ''}`.trim() || undefined
+    if (platform !== 'tw' && !explicitVideoId) throw new Error('NimiWiki 항목 ID를 확인하지 못했습니다.')
 
     parsedItems.push({
       title: buildTitle(
@@ -339,13 +385,14 @@ function parseApiPayload(input: string, pageUrl: string): ParsedItem[] | undefin
         normalizedStatusUrl ?? normalizedVideoUrl,
       ),
       url: normalizedVideoUrl,
-      dedupeKey: buildDedupeKey(
+      sourcePlatform: platform,
+      dedupeKey: platform !== 'tw' ? `nimi:${platform}:item:${explicitVideoId}` : buildDedupeKey(
         normalizedVideoUrl,
         normalizedStatusUrl,
         normalizedPreviewImageUrl,
         explicitVideoId,
       ),
-      identities: twitterMediaIdentities(
+      identities: platform !== 'tw' ? [{ kind: 'source-id', scope: 'site', value: `nimi:${platform}:item:${explicitVideoId}` }] : twitterMediaIdentities(
         normalizedVideoUrl,
         normalizedStatusUrl,
         normalizedPreviewImageUrl,
@@ -410,6 +457,7 @@ function extractHtmlViewSnippet(html: string): string | undefined {
 }
 
 function parseHtmlFallback(input: string, pageUrl: string): ParsedItem[] {
+  if (getNimiPlatform(pageUrl) !== 'tw') return []
   const previewMatches = collectHtmlPreviewMatches(input)
   const parsedItems: RankedParsedItem[] = []
 
@@ -466,6 +514,7 @@ function parseHtmlFallback(input: string, pageUrl: string): ParsedItem[] {
       previewImageUrl: absolutePreviewImageUrl,
       summary: normalizedStatusUrl,
       rawHtmlSnippet: extractHtmlViewSnippet(afterImageHtml),
+      sourcePlatform: 'tw',
       rankOrder,
     })
   }

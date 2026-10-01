@@ -5,25 +5,22 @@ import type {
   CrawledItemLog,
   CrawlDiagnosticArtifact,
   CrawlRun,
-  ItemCountSummary,
-  ItemGroup,
   ItemIdentity,
   ItemSignature,
   ParsedItem,
+  NimiPlatform,
 } from '../types/contracts'
+import { getItemSourcePlatform, isNimiPlatform } from '../extension/nimi'
 import { hashString } from '../utils/hash'
 import {
   createItemSignatures,
-  matchSimilarItems,
   normalizeItemIdentities,
-  normalizeTitleForSimilarity,
   recoverItemIdentities,
   sharesExactIdentity,
-} from './item-similarity'
+} from './item-identities'
 import { db } from './schema'
 
 const MAX_SNIPPET_LENGTH = 280
-const MAX_SIMILARITY_CANDIDATES = 100
 const BACKFILL_META_KEY = 'item-signature-backfill-v1'
 const BACKFILL_VERSION = 1
 const DEDUPE_MEDIA_ID_REGEX = /(?:^|:)(?:video-id|preview-id):([^:\s]+)$/i
@@ -44,8 +41,6 @@ export interface UpsertCrawledItemsResult {
   insertedCount: number
   duplicateCount: number
   exactDuplicateCount: number
-  similarGroupedCount: number
-  uniqueInsertedCount: number
   rejectedCount: number
 }
 
@@ -147,7 +142,8 @@ function legacyFingerprintValues(item: CrawledItem): string[] {
     )?.[1]
     if (mediaId) values.add(`media-id:${mediaId}`)
   }
-  return [...values]
+  return item.siteId === 'nimi-tw-ranking' && item.sourcePlatform && item.sourcePlatform !== 'tw'
+    ? [...values].map((value) => `nimi:${item.sourcePlatform}:${value}`) : [...values]
 }
 
 function legacyLogId(siteId: string, value: string): string {
@@ -172,7 +168,7 @@ function normalizeParsedItem(
   const identities = normalizeItemIdentities([
     ...(parsed.identities ?? []),
     ...identitiesFromDedupeKey(parsed.dedupeKey),
-    ...recoverItemIdentities(baseForRecovery),
+    ...(parsed.identities?.length ? [] : recoverItemIdentities(baseForRecovery)),
   ])
   const item: CrawledItem = {
     id: createItemId(siteId, url, title, parsed.dedupeKey),
@@ -181,12 +177,12 @@ function normalizeParsedItem(
     url,
     dedupeKey: normalizeDedupeKey(parsed.dedupeKey),
     identities,
-    normalizedTitle: normalizeTitleForSimilarity(title),
     previewImageUrl: baseForRecovery.previewImageUrl,
     summary: baseForRecovery.summary,
     price: parsed.price,
     rawHtmlSnippet: clipSnippet(parsed.rawHtmlSnippet),
     crawledAt,
+    sourcePlatform: siteId === 'nimi-tw-ranking' && isNimiPlatform(parsed.sourcePlatform) ? parsed.sourcePlatform : undefined,
   }
   const legacyValues = legacyFingerprintValues(item)
   return {
@@ -222,63 +218,6 @@ async function loadMatchingSignatures(
     }),
   )
   return result
-}
-
-async function loadSimilarityCandidates(
-  siteId: string,
-  signatures: readonly ItemSignature[],
-): Promise<CrawledItem[]> {
-  const titleSignatures = signatures.filter(
-    (signature) => signature.kind === 'title-exact' || signature.kind === 'title-band',
-  )
-  const matches = await Promise.all(
-    titleSignatures.map((signature) =>
-      db.itemSignatures
-        .where('[siteId+kind+valueHash]')
-        .equals([siteId, signature.kind, signature.valueHash])
-        .limit(MAX_SIMILARITY_CANDIDATES)
-        .toArray(),
-    ),
-  )
-  const itemIds = [...new Set(matches.flat().map((signature) => signature.itemId))].slice(
-    0,
-    MAX_SIMILARITY_CANDIDATES,
-  )
-  const items = itemIds.length > 0 ? await db.items.bulkGet(itemIds) : []
-  return items.filter((item): item is CrawledItem => Boolean(item))
-}
-
-function chooseRepresentative(items: readonly CrawledItem[]): CrawledItem {
-  return [...items].sort((first, second) => {
-    const preview = Number(Boolean(second.previewImageUrl)) - Number(Boolean(first.previewImageUrl))
-    if (preview !== 0) return preview
-    const summary = Number(Boolean(second.summary)) - Number(Boolean(first.summary))
-    if (summary !== 0) return summary
-    return second.crawledAt - first.crawledAt
-  })[0] as CrawledItem
-}
-
-function oldestGroupId(items: readonly CrawledItem[]): string | undefined {
-  const oldest = [...items].sort((a, b) => a.crawledAt - b.crawledAt || a.id.localeCompare(b.id))[0]
-  return oldest ? oldest.contentGroupId ?? `item:${oldest.id}` : undefined
-}
-
-async function resolveOldestGroupId(items: readonly CrawledItem[]): Promise<string | undefined> {
-  const groupIds = [...new Set(items.map((item) => item.contentGroupId).filter(Boolean))] as string[]
-  const groupMembers = (
-    await Promise.all(groupIds.map((groupId) => db.items.where('contentGroupId').equals(groupId).toArray()))
-  ).flat()
-  return oldestGroupId([...items, ...groupMembers])
-}
-
-async function mergeGroups(groupIds: readonly string[], targetGroupId: string): Promise<void> {
-  const oldIds = [...new Set(groupIds.filter((groupId) => groupId !== targetGroupId))]
-  for (const oldId of oldIds) {
-    const members = await db.items.where('contentGroupId').equals(oldId).toArray()
-    if (members.length > 0) {
-      await db.items.bulkPut(members.map((item) => ({ ...item, contentGroupId: targetGroupId })))
-    }
-  }
 }
 
 function createOrUpdateLog(
@@ -319,8 +258,6 @@ export async function upsertCrawledItems(
       insertedCount: 0,
       duplicateCount: 0,
       exactDuplicateCount: 0,
-      similarGroupedCount: 0,
-      uniqueInsertedCount: 0,
       rejectedCount: parsedItems.length - normalized.length,
     }
   }
@@ -359,7 +296,6 @@ export async function upsertCrawledItems(
   const logsToWrite = new Map<string, CrawledItemLog>()
   const batchExact = new Map<string, CrawledItem>()
   let exactDuplicateCount = inBatchDuplicateCount
-  let similarGroupedCount = 0
 
   await db.transaction('rw', db.items, db.itemSignatures, db.crawledItemLogs, async () => {
     for (const candidate of candidates) {
@@ -378,7 +314,7 @@ export async function upsertCrawledItems(
       const directItem = [item.id, ...candidate.equivalentItemIds]
         .map((id) => existingItemsById.get(id))
         .find((value): value is CrawledItem => Boolean(value))
-      const directLog = [item.id, ...candidate.equivalentItemIds, ...candidate.legacyFingerprintLogIds]
+      let directLog = [item.id, ...candidate.equivalentItemIds, ...candidate.legacyFingerprintLogIds]
         .map((id) => logsById.get(id))
         .find((value): value is CrawledItemLog => Boolean(value))
       const legacyMatch = legacyItems.find((legacy) => {
@@ -386,6 +322,17 @@ export async function upsertCrawledItems(
         return legacyFingerprintValues(item).some((value) => legacyValues.has(value))
       })
       const duplicateSource = sameSiteExact ?? batchMatch ?? directItem ?? legacyMatch
+
+      // Older heuristic matches may have logged a different post as already collected.
+      if (directLog && !duplicateSource && directLog.itemId !== item.id) {
+        const loggedItem = await db.items.get(directLog.itemId)
+        const hasSourceId = (value: CrawledItem) => value.identities?.some(
+          (identity) => identity.kind === 'source-id' && identity.scope === 'site',
+        )
+        if (loggedItem && hasSourceId(item) && hasSourceId(loggedItem) && !sharesExactIdentity(item, loggedItem)) {
+          directLog = undefined
+        }
+      }
 
       if (duplicateSource || directLog) {
         exactDuplicateCount += 1
@@ -404,30 +351,18 @@ export async function upsertCrawledItems(
             }
           : createOrUpdateLog(undefined, source, observedLogId, crawledAt))
 
-        const bridgeItems = [...exactItems, ...(batchMatch ? [batchMatch] : [])]
-        if (bridgeItems.length > 1) {
-          const targetGroupId = await resolveOldestGroupId(bridgeItems)
-          if (targetGroupId) {
-            await mergeGroups(
-              bridgeItems.map((value) => value.contentGroupId ?? `item:${value.id}`),
-              targetGroupId,
-            )
-            await db.items.bulkPut(
-              bridgeItems.map((value) => ({
-                ...value,
-                contentGroupId: targetGroupId,
-                groupReason: 'global-identity' as const,
-                groupScore: 1,
-              })),
-            )
+        if (duplicateSource && (item.previewImageUrl || item.sourcePlatform)) {
+          const refresh = {
+            ...(item.previewImageUrl ? { previewImageUrl: item.previewImageUrl } : {}),
+            ...(siteId === 'nimi-tw-ranking' && item.sourcePlatform ? {
+              sourcePlatform: item.sourcePlatform, url: item.url,
+              ...(item.summary ? { summary: item.summary } : {}),
+            } : {}),
           }
-        }
-
-        if (duplicateSource && item.previewImageUrl) {
           if (batchMatch?.id === duplicateSource.id) {
             const refreshedBatchItem = {
               ...batchMatch,
-              previewImageUrl: item.previewImageUrl,
+              ...refresh,
             }
             const freshIndex = freshItems.findIndex(
               (freshItem) => freshItem.id === refreshedBatchItem.id,
@@ -439,11 +374,11 @@ export async function upsertCrawledItems(
               }
             }
           } else {
-            const currentSource = (await db.items.get(duplicateSource.id)) ?? duplicateSource
-            if (currentSource.previewImageUrl !== item.previewImageUrl) {
+            const currentSource = await db.items.get(duplicateSource.id)
+            if (currentSource && Object.entries(refresh).some(([key, value]) => currentSource[key as keyof CrawledItem] !== value)) {
               await db.items.put({
                 ...currentSource,
-                previewImageUrl: item.previewImageUrl,
+                ...refresh,
               })
             }
           }
@@ -451,69 +386,12 @@ export async function upsertCrawledItems(
         continue
       }
 
-      const globalMatches = exactItems.filter((value) => value.siteId !== siteId)
-      let storedItem = item
-      if (globalMatches.length > 0) {
-        const groupId =
-          (await resolveOldestGroupId(globalMatches)) ?? `item:${globalMatches[0]?.id}`
-        storedItem = {
-          ...storedItem,
-          contentGroupId: groupId,
-          groupReason: 'global-identity',
-          groupScore: 1,
-        }
-        await mergeGroups(
-          globalMatches.map((value) => value.contentGroupId ?? `item:${value.id}`),
-          groupId,
-        )
-        await db.items.bulkPut(
-          globalMatches.map((value) => ({
-            ...value,
-            contentGroupId: groupId,
-            groupReason: 'global-identity' as const,
-            groupScore: 1,
-          })),
-        )
-      } else {
-        const dbSimilarityCandidates = await loadSimilarityCandidates(siteId, candidate.signatures)
-        const similarityCandidates = [...dbSimilarityCandidates, ...freshItems].slice(
-          0,
-          MAX_SIMILARITY_CANDIDATES,
-        )
-        const matched = similarityCandidates
-          .map((value) => ({ value, match: matchSimilarItems(item, value) }))
-          .filter((entry): entry is { value: CrawledItem; match: NonNullable<typeof entry.match> } => Boolean(entry.match))
-          .sort((a, b) => b.match.score - a.match.score)[0]
-        if (matched) {
-          const groupId = matched.value.contentGroupId ?? `item:${matched.value.id}`
-          storedItem = {
-            ...storedItem,
-            contentGroupId: groupId,
-            groupReason: matched.match.reason,
-            groupScore: matched.match.score,
-          }
-          similarGroupedCount += 1
-          if (!matched.value.contentGroupId) {
-            const groupedCandidate = {
-              ...matched.value,
-              contentGroupId: groupId,
-              groupReason: matched.match.reason,
-              groupScore: matched.match.score,
-            }
-            await db.items.put(groupedCandidate)
-            const index = freshItems.findIndex((value) => value.id === groupedCandidate.id)
-            if (index >= 0) freshItems[index] = groupedCandidate
-          }
-        }
-      }
-
-      freshItems.push(storedItem)
-      const storedSignatures = createItemSignatures(storedItem)
-      signaturesToWrite.push(...storedSignatures)
-      logsToWrite.set(storedItem.id, {
-        id: storedItem.id,
+      freshItems.push(item)
+      signaturesToWrite.push(...candidate.signatures)
+      logsToWrite.set(item.id, {
+        id: item.id,
         siteId,
-        itemId: storedItem.id,
+        itemId: item.id,
         firstSeenAt: crawledAt,
         lastSeenAt: crawledAt,
         seenCount: 1,
@@ -522,14 +400,14 @@ export async function upsertCrawledItems(
         logsToWrite.set(legacyId, {
           id: legacyId,
           siteId,
-          itemId: storedItem.id,
+          itemId: item.id,
           firstSeenAt: crawledAt,
           lastSeenAt: crawledAt,
           seenCount: 1,
         })
       }
-      for (const signature of storedSignatures.filter(isExactSignature)) {
-        batchExact.set(signatureLookupKey(signature), storedItem)
+      for (const signature of candidate.signatures.filter(isExactSignature)) {
+        batchExact.set(signatureLookupKey(signature), item)
       }
     }
 
@@ -545,95 +423,45 @@ export async function upsertCrawledItems(
     insertedCount,
     duplicateCount: exactDuplicateCount,
     exactDuplicateCount,
-    similarGroupedCount,
-    uniqueInsertedCount: insertedCount - similarGroupedCount,
     rejectedCount: parsedItems.length - normalized.length,
   }
 }
 
-export async function listItemsBySite(siteId: string, limit = 200): Promise<CrawledItem[]> {
-  return db.items
+export async function listItemsBySite(siteId: string, limit = 200, sourcePlatform?: NimiPlatform): Promise<CrawledItem[]> {
+  const query = db.items
     .where('[siteId+crawledAt]')
     .between([siteId, Dexie.minKey], [siteId, Dexie.maxKey])
     .reverse()
-    .limit(limit)
-    .toArray()
+  // ponytail: filter optional legacy metadata before limiting; index only if large libraries make this slow.
+  return (sourcePlatform ? query.filter((item) => getItemSourcePlatform(item) === sourcePlatform) : query).limit(limit).toArray()
 }
 
-export async function listItemGroupsBySite(siteId: string, limit = 200): Promise<ItemGroup[]> {
-  const siteItems = await listItemsBySite(siteId, limit)
-  const groupIds = [...new Set(siteItems.map((item) => item.contentGroupId).filter(Boolean))] as string[]
-  const crossSiteMembers = (
-    await Promise.all(groupIds.map((groupId) => db.items.where('contentGroupId').equals(groupId).toArray()))
-  ).flat()
-  const allById = new Map([...siteItems, ...crossSiteMembers].map((item) => [item.id, item]))
-  const groups = new Map<string, CrawledItem[]>()
-  for (const item of allById.values()) {
-    const groupId = item.contentGroupId ?? `item:${item.id}`
-    const values = groups.get(groupId) ?? []
-    values.push(item)
-    groups.set(groupId, values)
-  }
-  return [...groups.entries()]
-    .filter(([, values]) => values.some((item) => item.siteId === siteId))
-    .map(([id, values]) => {
-      const localItems = values.filter((item) => item.siteId === siteId)
-      const representative = chooseRepresentative(localItems.length > 0 ? localItems : values)
-      return {
-        id,
-        representative,
-        items: [...values].sort((a, b) => b.crawledAt - a.crawledAt),
-        reason: values.find((item) => item.groupReason)?.groupReason,
-        score: Math.max(...values.map((item) => item.groupScore ?? 0)),
-      }
-    })
-    .sort((a, b) => b.representative.crawledAt - a.representative.crawledAt)
-}
-
-export async function listItemCountsBySite(
-  siteIds: readonly string[],
-): Promise<Record<string, number>> {
-  const summaries = await listItemCountSummariesBySite(siteIds)
-  return Object.fromEntries(Object.entries(summaries).map(([siteId, value]) => [siteId, value.itemCount]))
-}
-
-export async function listItemCountSummariesBySite(
-  siteIds: readonly string[],
-): Promise<Record<string, ItemCountSummary>> {
-  const entries = await Promise.all(
-    siteIds.map(async (siteId) => {
-      const items = await db.items.where('siteId').equals(siteId).toArray()
-      const groupCount = new Set(items.map((item) => item.contentGroupId ?? `item:${item.id}`)).size
-      return [siteId, { itemCount: items.length, groupCount }] as const
-    }),
-  )
-  return Object.fromEntries(entries)
-}
-
-export async function excludeItemFromSimilarityGroup(itemId: string): Promise<void> {
-  await db.transaction('rw', db.items, db.itemSignatures, async () => {
-    const item = await db.items.get(itemId)
-    if (!item || item.groupReason === 'global-identity') return
-    await db.items.put({
-      ...item,
-      contentGroupId: undefined,
-      groupReason: undefined,
-      groupScore: undefined,
-      similarityExcluded: true,
-    })
-    const titleSignatures = await db.itemSignatures.where('itemId').equals(itemId).toArray()
-    await db.itemSignatures.bulkDelete(
-      titleSignatures
-        .filter((signature) => signature.kind === 'title-exact' || signature.kind === 'title-band')
-        .map((signature) => signature.id),
-    )
-  })
+export async function listItemCountsBySite(siteIds: readonly string[]): Promise<Record<string, number>> {
+  return Object.fromEntries(await Promise.all(siteIds.map(async (siteId) => [siteId, await countCrawledItems(siteId)])))
 }
 
 export async function deleteCrawledItem(itemId: string): Promise<void> {
-  await db.transaction('rw', db.items, db.itemSignatures, async () => {
-    await db.items.delete(itemId)
-    await db.itemSignatures.where('itemId').equals(itemId).delete()
+  await deleteCrawledItems([itemId])
+}
+
+export async function listCrawledItemIds(siteId?: string, sourcePlatform?: NimiPlatform): Promise<string[]> {
+  const query = siteId ? db.items.where('siteId').equals(siteId) : db.items.toCollection()
+  return sourcePlatform ? query.filter((item) => getItemSourcePlatform(item) === sourcePlatform).primaryKeys() : query.primaryKeys()
+}
+
+export async function countCrawledItems(siteId?: string, sourcePlatform?: NimiPlatform): Promise<number> {
+  const query = siteId ? db.items.where('siteId').equals(siteId) : db.items.toCollection()
+  return (sourcePlatform ? query.filter((item) => getItemSourcePlatform(item) === sourcePlatform) : query).count()
+}
+
+export async function deleteCrawledItems(itemIds: readonly string[]): Promise<string[]> {
+  return db.transaction('rw', db.items, db.itemSignatures, async () => {
+    const existing = (await db.items.bulkGet([...new Set(itemIds)])).filter((item): item is CrawledItem => !!item)
+    const ids = existing.map((item) => item.id)
+    await db.items.bulkDelete(ids)
+    await db.itemSignatures.where('itemId').anyOf(ids).delete()
+    // Keep seen logs so intentionally deleted articles are not collected again.
+    return ids
   })
 }
 
@@ -685,108 +513,11 @@ export async function runItemSignatureBackfillBatch(batchSize = 100): Promise<It
     ? Math.max(0, allItems.findIndex((item) => item.id === progress.cursor) + 1)
     : 0
   const batch = allItems.slice(startIndex, startIndex + batchSize)
-  const prepare = (item: CrawledItem): CrawledItem => {
-    const identities = normalizeItemIdentities(
-      item.identities?.length ? item.identities : recoverItemIdentities(item),
-    )
-    return {
-      ...item,
-      identities,
-      normalizedTitle: item.normalizedTitle ?? normalizeTitleForSimilarity(item.title),
-    }
-  }
-  const available = allItems.slice(0, startIndex).map(prepare)
-  const updatesById = new Map<string, CrawledItem>()
-
-  for (const rawItem of batch) {
-    let item = prepare(rawItem)
-    const exactMatches = available.filter((candidate) => sharesExactIdentity(item, candidate))
-
-    if (exactMatches.length > 0) {
-      const oldGroupIds = new Set(
-        exactMatches.map((candidate) => candidate.contentGroupId ?? `item:${candidate.id}`),
-      )
-      const relatedGroupMembers = available.filter((candidate) =>
-        oldGroupIds.has(candidate.contentGroupId ?? `item:${candidate.id}`),
-      )
-      const groupId =
-        oldestGroupId([...exactMatches, ...relatedGroupMembers]) ?? `item:${exactMatches[0]?.id}`
-      item = {
-        ...item,
-        contentGroupId: groupId,
-        groupReason: 'global-identity',
-        groupScore: 1,
-      }
-      for (let index = 0; index < available.length; index += 1) {
-        const candidate = available[index]
-        if (!candidate) continue
-        const candidateGroupId = candidate.contentGroupId ?? `item:${candidate.id}`
-        if (!oldGroupIds.has(candidateGroupId) && !exactMatches.some((value) => value.id === candidate.id)) {
-          continue
-        }
-        const grouped = {
-          ...candidate,
-          contentGroupId: groupId,
-          groupReason: 'global-identity' as const,
-          groupScore: 1,
-        }
-        available[index] = grouped
-        updatesById.set(grouped.id, grouped)
-      }
-    } else {
-      const itemBands = new Set(
-        createItemSignatures(item)
-          .filter((signature) => signature.kind === 'title-band')
-          .map((signature) => signature.valueHash),
-      )
-      const similarityCandidates = available
-        .filter((candidate) => candidate.siteId === item.siteId)
-        .filter((candidate) =>
-          createItemSignatures(candidate).some(
-            (signature) => signature.kind === 'title-band' && itemBands.has(signature.valueHash),
-          ),
-        )
-        .slice(-MAX_SIMILARITY_CANDIDATES)
-      const matched = similarityCandidates
-        .map((candidate) => ({ candidate, match: matchSimilarItems(item, candidate) }))
-        .filter((entry): entry is {
-          candidate: CrawledItem
-          match: NonNullable<typeof entry.match>
-        } => Boolean(entry.match))
-        .sort((first, second) => second.match.score - first.match.score)[0]
-      if (matched) {
-        const groupId = matched.candidate.contentGroupId ?? `item:${matched.candidate.id}`
-        item = {
-          ...item,
-          contentGroupId: groupId,
-          groupReason: matched.match.reason,
-          groupScore: matched.match.score,
-        }
-        if (!matched.candidate.contentGroupId) {
-          const groupedCandidate = {
-            ...matched.candidate,
-            contentGroupId: groupId,
-            groupReason: matched.match.reason,
-            groupScore: matched.match.score,
-          }
-          const candidateIndex = available.findIndex(
-            (candidate) => candidate.id === groupedCandidate.id,
-          )
-          if (candidateIndex >= 0) available[candidateIndex] = groupedCandidate
-          updatesById.set(groupedCandidate.id, groupedCandidate)
-        }
-      }
-    }
-
-    available.push(item)
-    updatesById.set(item.id, item)
-  }
-
-  const updates = [...updatesById.values()]
-  const signatures = batch
-    .map((item) => updatesById.get(item.id))
-    .filter((item): item is CrawledItem => Boolean(item))
-    .flatMap(createItemSignatures)
+  const updates = batch.map((item) => ({
+    ...item,
+    identities: normalizeItemIdentities(item.identities?.length ? item.identities : recoverItemIdentities(item)),
+  }))
+  const signatures = updates.flatMap(createItemSignatures)
   const processed = Math.min(allItems.length, startIndex + batch.length)
   const next: ItemBackfillProgress = {
     version: BACKFILL_VERSION,
@@ -797,8 +528,13 @@ export async function runItemSignatureBackfillBatch(batchSize = 100): Promise<It
   }
   const meta: AppMeta = { key: BACKFILL_META_KEY, value: next, updatedAt: Date.now() }
   await db.transaction('rw', db.items, db.itemSignatures, db.appMeta, async () => {
-    if (updates.length > 0) await db.items.bulkPut(updates)
-    if (signatures.length > 0) await db.itemSignatures.bulkPut(signatures)
+    // A deletion may have committed while this batch was being prepared.
+    const liveIds = new Set((await db.items.bulkGet(updates.map((item) => item.id)))
+      .filter((item): item is CrawledItem => !!item).map((item) => item.id))
+    const liveUpdates = updates.filter((item) => liveIds.has(item.id))
+    const liveSignatures = signatures.filter((signature) => liveIds.has(signature.itemId))
+    if (liveUpdates.length > 0) await db.items.bulkPut(liveUpdates)
+    if (liveSignatures.length > 0) await db.itemSignatures.bulkPut(liveSignatures)
     await db.appMeta.put(meta)
   })
   return next

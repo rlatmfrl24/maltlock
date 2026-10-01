@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { nimiTwRankingParser } from './nimi-tw-ranking.parser'
+import { isEmptyNimiApiPayload, nimiTwRankingParser } from './nimi-tw-ranking.parser'
 
 function loadApiFixture(): string {
   const fixturePath = new URL('../test/fixtures/parsers/nimi_ranking_example.json', import.meta.url)
@@ -21,6 +21,73 @@ function loadHtmlFixture(): string {
 }
 
 describe('nimiTwRankingParser', () => {
+  it('preserves each platform from live API captures and never creates Twitter identities for other platforms', () => {
+    const payloads = JSON.parse(readFileSync(new URL('../test/fixtures/parsers/nimi_platform_api.json', import.meta.url), 'utf-8'))
+    for (const platform of ['tw', 'ig', 'tt', 'bs']) {
+      const payload = payloads[platform]
+      const url = `https://video1.nimi.wiki/${platform}/ranking?sort=plays&period=week`
+      const items = nimiTwRankingParser(JSON.stringify(payload), url)
+      expect(items).toHaveLength(payload.items.length)
+      for (const [index, item] of items.entries()) {
+        expect(item.sourcePlatform).toBe(platform)
+        expect(item.url).toBe(payload.items[index].file_url || payload.items[index].hls_url)
+        expect(item.summary).toBe(payload.items[index].posts[0].url)
+        expect(item.previewImageUrl).toBe(payload.items[index].thumbnail_url)
+        if (platform !== 'tw') {
+          expect(item.dedupeKey).toBe(`nimi:${platform}:item:${payload.items[index].id}`)
+          expect(item.identities).toEqual([{ kind: 'source-id', scope: 'site', value: item.dedupeKey }])
+        }
+      }
+      if (platform !== 'tw') {
+        payload.items[0].video_id = 'provider-id'
+        expect(nimiTwRankingParser(JSON.stringify(payload), url)[0]?.dedupeKey).toBe(items[0]?.dedupeKey)
+      }
+      payload.items[0].platform = platform === 'tw' ? 'ig' : 'tw'
+      expect(() => nimiTwRankingParser(JSON.stringify(payload), url)).toThrow('플랫폼')
+    }
+    expect(isEmptyNimiApiPayload('{"items":[]}')).toBe(true)
+    expect(isEmptyNimiApiPayload('{"success":false,"items":[]}')).toBe(false)
+    expect(isEmptyNimiApiPayload('{"error":"blocked"}')).toBe(false)
+    expect(isEmptyNimiApiPayload('{"error":"blocked","items":[]}')).toBe(false)
+    expect(() => nimiTwRankingParser('{"error":"blocked","items":[]}', 'https://video1.nimi.wiki/ig/ranking')).toThrow('응답 형식')
+    expect(() => nimiTwRankingParser('{"error":"blocked"}', 'https://video1.nimi.wiki/ig/ranking')).toThrow('응답 형식')
+  })
+  it('extracts ranked media from the items envelope captured in the failed diagnostic', () => {
+    const fixture = readFileSync(
+      new URL('../test/fixtures/parsers/nimi_video_api_items.json', import.meta.url),
+      'utf-8',
+    )
+    const items = nimiTwRankingParser(fixture, 'https://video.nimi.wiki/tw/ranking/week')
+
+    expect(items).toHaveLength(2)
+    expect(items[0]).toMatchObject({
+      title: '1위 - Korean Girl Video님의 동영상',
+      url: 'https://video.twimg.com/amplify_video/2095443549630386176/vid/avc1/1080x1080/FFMKv9-KMDNBWVM4.mp4?tag=29',
+      previewImageUrl:
+        'https://pbs.twimg.com/amplify_video_thumb/2095443549630386176/img/Kyw2MTBVbQcMLzmT.jpg?name=orig',
+      summary: 'https://x.com/i/status/2095586436263403649',
+      dedupeKey: 'nimi:video-id:01a0697d-dba6-78d4-ab4c-b7aea832cb38',
+      rawHtmlSnippet: '조회수 33130',
+      identities: expect.arrayContaining([
+        { kind: 'media-id', value: 'video:2095443549630386176', scope: 'global' },
+        { kind: 'media-id', value: 'tweet:2095586436263403649', scope: 'global' },
+      ]),
+    })
+    expect(items[1]?.title).toBe('2위 - 탱덩이님의 동영상')
+
+    const payload = JSON.parse(fixture)
+    expect(nimiTwRankingParser(JSON.stringify(payload.items), 'https://video.nimi.wiki/tw/ranking/week'))
+      .toEqual(items)
+    payload.items.push(payload.items[0])
+    expect(nimiTwRankingParser(JSON.stringify(payload), 'https://video.nimi.wiki/tw/ranking/week'))
+      .toEqual(items)
+  })
+
+  it('accepts an empty items envelope without treating legacy data as current results', () => {
+    const payload = JSON.stringify({ items: [], data: JSON.parse(loadCurrentApiFixture()) })
+    expect(nimiTwRankingParser(payload, 'https://video.nimi.wiki/tw/ranking/week')).toEqual([])
+  })
+
   it('extracts playable media and canonical posts from the current video API', () => {
     const items = nimiTwRankingParser(
       loadCurrentApiFixture(),

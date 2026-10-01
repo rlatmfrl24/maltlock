@@ -1,11 +1,13 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import Dexie from 'dexie'
 import {
   clearAllData,
   createItemId,
   deleteCrawledItem,
-  excludeItemFromSimilarityGroup,
+  deleteCrawledItems,
+  listCrawledItemIds,
   getItemBackfillProgress,
-  listItemGroupsBySite,
+  countCrawledItems,
   getCrawlDiagnostic,
   listItemCountsBySite,
   listItemsBySite,
@@ -23,6 +25,58 @@ describe('repository', () => {
   afterAll(async () => {
     await db.delete()
     db.close()
+  })
+
+  it('keeps Nimi platform identities separate, refreshes signed media, and preserves deletion logs', async () => {
+    const siteId = 'nimi-tw-ranking'
+    const parsed = (sourcePlatform: 'ig' | 'tt') => ({
+      title: 'Same author video', sourcePlatform, dedupeKey: `nimi:${sourcePlatform}:item:same-id`,
+      identities: [{ kind: 'source-id' as const, scope: 'site' as const, value: `nimi:${sourcePlatform}:item:same-id` }],
+      url: `https://${sourcePlatform}.test/same-path.mp4?token=old`,
+      previewImageUrl: `https://${sourcePlatform}.test/preview.jpg`,
+    })
+    expect((await upsertCrawledItems(siteId, [parsed('ig'), parsed('tt')])).insertedCount).toBe(2)
+    const before = (await listItemsBySite(siteId)).find((item) => item.sourcePlatform === 'ig')!
+    const updated = { ...parsed('ig'), url: 'https://ig.test/same-path.mp4?token=new' }
+    expect((await upsertCrawledItems(siteId, [updated])).exactDuplicateCount).toBe(1)
+    expect(await db.items.get(before.id)).toMatchObject({ id: before.id, sourcePlatform: 'ig', url: updated.url })
+    await deleteCrawledItem(before.id)
+    expect((await upsertCrawledItems(siteId, [updated])).insertedCount).toBe(0)
+    expect(await listItemsBySite(siteId)).toHaveLength(1)
+  })
+
+  it('filters platforms before the list limit and counts/selects all matching legacy records', async () => {
+    const siteId = 'nimi-tw-ranking'
+    const legacy = { id: 'old-twitter', siteId, title: 'Legacy Twitter', url: 'https://video.twimg.com/video.mp4', crawledAt: 1 }
+    await db.items.bulkPut([legacy, ...Array.from({ length: 205 }, (_, index) => ({
+      id: `ig-${index}`, siteId, title: `Instagram ${index}`, url: `https://www.instagram.com/p/${index}/`, crawledAt: index + 2,
+    }))])
+    expect((await listItemsBySite(siteId, 200, 'tw'))[0].id).toBe(legacy.id)
+    expect(await countCrawledItems(siteId, 'ig')).toBe(205)
+    expect(await listCrawledItemIds(siteId, 'ig')).toHaveLength(205)
+    expect(await listCrawledItemIds(siteId, 'tw')).toEqual([legacy.id])
+  })
+
+  it('does not restore a Nimi item deleted between the recrawl lookup and media refresh', async () => {
+    const parsed = {
+      title: 'Delete during refresh', sourcePlatform: 'ig' as const,
+      dedupeKey: 'nimi:ig:item:delete-race', url: 'https://ig.test/video.mp4?token=old',
+      identities: [{ kind: 'source-id' as const, scope: 'site' as const, value: 'nimi:ig:item:delete-race' }],
+    }
+    const first = await upsertCrawledItems('nimi-tw-ranking', [parsed])
+    const id = first.items[0].id
+    const bulkGet = db.items.bulkGet.bind(db.items)
+    const spy = vi.spyOn(db.items, 'bulkGet').mockImplementationOnce((keys) =>
+      Dexie.Promise.resolve(bulkGet(keys)).then((snapshot) =>
+        Dexie.Promise.resolve(deleteCrawledItems([id])).then(() => snapshot)),
+    )
+    try {
+      expect(await upsertCrawledItems('nimi-tw-ranking', [{ ...parsed, url: parsed.url.replace('old', 'new') }]))
+        .toMatchObject({ insertedCount: 0, exactDuplicateCount: 1 })
+      expect(await db.items.get(id)).toBeUndefined()
+      expect(await db.itemSignatures.where('itemId').equals(id).count()).toBe(0)
+      expect(await db.crawledItemLogs.get(id)).toMatchObject({ itemId: id, seenCount: 2 })
+    } finally { spy.mockRestore() }
   })
 
   it('creates stable item id regardless of title/url casing', () => {
@@ -544,6 +598,40 @@ describe('repository', () => {
     expect(afterDelete[0]?.title).toBe('Keep Me')
   })
 
+  it('bulk deletes all selected site rows beyond the display limit and keeps seen logs', async () => {
+    const rows = Array.from({ length: 205 }, (_, i) => ({ title: `Article ${i}`, url: `https://example.com/${i}` }))
+    await upsertCrawledItems('hacker-news', rows)
+    await upsertCrawledItems('other-site', [{ title: 'Keep', url: 'https://other.test/keep' }])
+    const ids = await listCrawledItemIds('hacker-news')
+    expect(ids).toHaveLength(205)
+    const logCount = await db.crawledItemLogs.count()
+    expect(await deleteCrawledItems([...ids, ids[0]!, 'missing'])).toHaveLength(205)
+    expect(await listCrawledItemIds()).toHaveLength(1)
+    expect(await db.itemSignatures.where('siteId').equals('hacker-news').count()).toBe(0)
+    expect(await db.crawledItemLogs.count()).toBe(logCount)
+    expect((await upsertCrawledItems('hacker-news', rows)).insertedCount).toBe(0)
+    expect(await listCrawledItemIds('hacker-news')).toEqual([])
+    await deleteCrawledItems(await listCrawledItemIds())
+    expect(await db.items.count()).toBe(0)
+  })
+
+  it('does not restore an item deleted after the backfill snapshot', async () => {
+    await upsertCrawledItems('hacker-news', [{ title: 'Delete during backfill', url: 'https://example.com/race' }])
+    const [id] = await listCrawledItemIds()
+    const bulkGet = db.items.bulkGet.bind(db.items)
+    const spy = vi.spyOn(db.items, 'bulkGet').mockImplementationOnce((keys) =>
+      Dexie.Promise.resolve(deleteCrawledItem(id!)).then(() => bulkGet(keys)),
+    )
+    try {
+      await runItemSignatureBackfillBatch()
+      expect(await db.items.count()).toBe(0)
+      expect(await db.itemSignatures.count()).toBe(0)
+      expect(await db.crawledItemLogs.count()).toBeGreaterThan(0)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
   it('does not re-insert deleted items when crawl log already exists', async () => {
     await upsertCrawledItems(
       'hacker-news',
@@ -633,7 +721,30 @@ describe('repository', () => {
     expect(result).toMatchObject({ insertedCount: 0, exactDuplicateCount: 1 })
   })
 
-  it('stores cross-site global identities and puts them in one group', async () => {
+  it('keeps distinct source posts with the same username and repairs a false seen alias', async () => {
+    const posts = ['one', 'two'].map((id, index) => ({
+      title: `yuma24 (${index + 2}.8GB)`,
+      url: `https://kone.gg/s/pornvideo/${id}?mode=hot`,
+      dedupeKey: `kone:path:/s/pornvideo/${id}`,
+      identities: [{ kind: 'source-id' as const, value: id, scope: 'site' as const }],
+    }))
+    const first = await upsertCrawledItems('kone-pornvideo-hot', [posts[0]])
+    const secondId = createItemId('kone-pornvideo-hot', posts[1].url, posts[1].title, posts[1].dedupeKey)
+    await db.crawledItemLogs.put({
+      id: secondId, siteId: 'kone-pornvideo-hot', itemId: first.items[0].id,
+      firstSeenAt: 1, lastSeenAt: 1, seenCount: 1,
+    })
+    const result = await upsertCrawledItems('kone-pornvideo-hot', posts)
+    expect(result).toMatchObject({ insertedCount: 1, exactDuplicateCount: 1 })
+    expect(await listItemsBySite('kone-pornvideo-hot')).toHaveLength(2)
+    expect(await db.crawledItemLogs.get(secondId)).toMatchObject({ itemId: secondId })
+    const recrawl = await upsertCrawledItems('kone-pornvideo-hot', posts)
+    expect(recrawl).toMatchObject({ insertedCount: 0, exactDuplicateCount: 2 })
+    await clearAllData()
+    expect(await upsertCrawledItems('kone-pornvideo-hot', posts)).toMatchObject({ insertedCount: 2, exactDuplicateCount: 0 })
+  })
+
+  it('stores cross-site global identities as separate site records without grouping', async () => {
     const identity = { kind: 'media-id' as const, value: 'video:555', scope: 'global' as const }
     await upsertCrawledItems('site-a', [
       { title: 'Source A title', url: 'https://a.example/555', identities: [identity] },
@@ -641,34 +752,28 @@ describe('repository', () => {
     const result = await upsertCrawledItems('site-b', [
       { title: 'Source B title', url: 'https://b.example/555', identities: [identity] },
     ], 200)
-    const groups = await listItemGroupsBySite('site-b')
     expect(result).toMatchObject({ insertedCount: 1, exactDuplicateCount: 0 })
-    expect(groups).toHaveLength(1)
-    expect(groups[0]?.items).toHaveLength(2)
-    expect(groups[0]?.reason).toBe('global-identity')
+    expect(await listItemsBySite('site-b')).toHaveLength(1)
+    expect(await countCrawledItems()).toBe(2)
+    expect((await db.items.toArray()).every((item) => !item.contentGroupId)).toBe(true)
   })
 
-  it('stores similar titles in a collapsed group and supports exclusion', async () => {
+  it('stores similar titles as individual items without title signatures', async () => {
     await upsertCrawledItems('site-a', [
       { title: '1위 [HD] Example Amazing Video 1.2GB', url: 'https://example.com/one' },
     ], 100)
     const result = await upsertCrawledItems('site-a', [
       { title: '2위 Example Amazing Video 900MB', url: 'https://example.com/two' },
     ], 200)
-    let groups = await listItemGroupsBySite('site-a')
-    expect(result).toMatchObject({ insertedCount: 1, similarGroupedCount: 1, uniqueInsertedCount: 0 })
-    expect(groups).toHaveLength(1)
-    expect(groups[0]?.items).toHaveLength(2)
-
-    const separated = groups[0]?.items.find((item) => item.url.endsWith('/two'))
-    expect(separated).toBeDefined()
-    await excludeItemFromSimilarityGroup(separated?.id ?? '')
-    groups = await listItemGroupsBySite('site-a')
-    expect(groups).toHaveLength(2)
-    expect((await db.items.get(separated?.id ?? ''))?.similarityExcluded).toBe(true)
+    expect(result).toMatchObject({ insertedCount: 1, exactDuplicateCount: 0 })
+    const items = await listItemsBySite('site-a')
+    expect(items).toHaveLength(2)
+    expect(items.every((item) => !item.contentGroupId && !item.normalizedTitle)).toBe(true)
+    expect((await db.itemSignatures.toArray()).some((signature) => signature.kind.startsWith('title-'))).toBe(false)
+    expect(await countCrawledItems('site-a')).toBe(2)
   })
 
-  it('merges exact groups when a new item bridges global identities', async () => {
+  it('keeps existing rows independent when a new site item bridges global identities', async () => {
     await upsertCrawledItems('site-a', [{
       title: 'First global item', url: 'https://a.example/one',
       identities: [{ kind: 'media-id', value: 'video:one', scope: 'global' }],
@@ -684,15 +789,16 @@ describe('repository', () => {
         { kind: 'media-id', value: 'video:two', scope: 'global' },
       ],
     }], 300)
-    const groups = await listItemGroupsBySite('site-c')
-    expect(groups[0]?.items).toHaveLength(3)
-    expect(new Set(groups[0]?.items.map((item) => item.contentGroupId)).size).toBe(1)
+    expect(await listItemsBySite('site-c')).toHaveLength(1)
+    const items = await db.items.toArray()
+    expect(items).toHaveLength(3)
+    expect(items.every((item) => !item.contentGroupId)).toBe(true)
   })
 
   it('backfills legacy items in resumable idempotent batches', async () => {
     await db.items.bulkPut([
-      { id: 'legacy-1', siteId: 'site-a', title: '1위 Legacy same long title 1.2GB', url: 'https://example.com/one', crawledAt: 1 },
-      { id: 'legacy-2', siteId: 'site-a', title: '2위 Legacy same long title 900MB', url: 'https://example.com/two', crawledAt: 2 },
+      { id: 'legacy-1', siteId: 'site-a', title: '1위 Legacy same long title 1.2GB', url: 'https://example.com/one', crawledAt: 1, contentGroupId: 'legacy-group' },
+      { id: 'legacy-2', siteId: 'site-a', title: '2위 Legacy same long title 900MB', url: 'https://example.com/two', crawledAt: 2, contentGroupId: 'legacy-group' },
     ])
     const first = await runItemSignatureBackfillBatch(1)
     expect(first).toMatchObject({ processed: 1, total: 2, complete: false })
@@ -702,8 +808,10 @@ describe('repository', () => {
     expect(await runItemSignatureBackfillBatch(1)).toEqual(second)
     expect(await db.itemSignatures.count()).toBe(signatureCount)
     expect((await getItemBackfillProgress()).complete).toBe(true)
-    expect((await db.items.get('legacy-1'))?.normalizedTitle).toBeTruthy()
-    expect((await listItemGroupsBySite('site-a'))[0]?.items).toHaveLength(2)
+    expect((await db.items.get('legacy-1'))?.identities?.length).toBeGreaterThan(0)
+    const items = await listItemsBySite('site-a')
+    expect(items).toHaveLength(2)
+    expect(items.every((item) => item.contentGroupId === 'legacy-group')).toBe(true)
   })
 
   it('keeps only the configured number of diagnostics per site', async () => {
