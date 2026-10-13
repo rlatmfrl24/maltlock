@@ -5,7 +5,7 @@ Executor: superpowers:executing-plans, inline implementation.
 
 ## Global Constraints
 
-- Preserve the five existing local changes captured in ae112de; no push or merge.
+- Initial delivery preserved the five existing local changes captured in ae112de without push/merge. The later explicit request authorizes integration of all pending changes into local master; remote push is not requested.
 - Existing parsers, database contracts, privacy, thumbnail cache and deletion semantics remain authoritative.
 - Primary entry: extension side panel, select site, crawling tab, start button; verify persisted results.
 - New logic gets failing regression coverage first. No dependency or database migration.
@@ -55,3 +55,5 @@ Final check: 25 unit files / 155 tests, TypeScript, ESLint and build pass. Full 
 Tasks 1–2 and Task 3 implementation/review/live verification/delivery are complete. All 19 final files were delivered to C:/Develop/maltlock after checking the five original modification hashes. Its build passes; 17 runtime artifacts match the tested build exactly, with three nonmaterial metadata/whitespace differences inspected separately. Existing nimi.ts/nimi.test.ts changes retain their original hashes. The local branch/worktree is kept for recovery under the accepted no-push/no-merge delivery plan. Task 3 scratch cleanup remains: recursive deletion was rejected by automatic policy review as blocked by policy, so the scratch directory is preserved.
 
 Rulings, review details and precise artifact/verification limits: [implementation report](../reports/2026-10-14-maltlock-results-crawling-ui.md).
+
+Follow-up request: default scopes now use automatic collection (Kone 1–5, KissJAV/123AV 1–3, TwiDouga 1–20; NimiWiki remains all platforms). All 21 originally pending files were integrated into local master using the identical c89e166 tree, then dea9103 added the defaults. Master check passes 160 unit tests, types, lint and build. Regular E2E: 18 cases passed in the full run and 2 initially failed cases passed after startup retry / correcting the hidden-select test order. Runtime UI and service-worker hashes match the tested artifact. This local-master integration supersedes the initial no-merge delivery ruling; no remote push occurred.
