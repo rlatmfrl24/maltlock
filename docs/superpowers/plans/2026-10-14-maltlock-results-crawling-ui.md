@@ -52,4 +52,6 @@ Tasks 1 and 2 were delivered atomically in cfcb997 to keep the required document
 
 Final check: 25 unit files / 155 tests, TypeScript, ESLint and build pass. Full regular E2E on cfcb997: 18 pass. The affected navigation/stop/timeout subset passed after the first review fix; final 8a5ac32 start/hash E2E: 2 pass. Final live NimiWiki start-button flow: 400 saved items, 4 successful persisted runs, API-to-storage missing items 0, actual thumbnail/viewer playback and safe deletion pass.
 
-Rulings, review details and precise artifact/verification limits: [implementation report](../reports/2026-10-14-maltlock-results-crawling-ui.md). Original delivery and final readback are recorded there when completed.
+Tasks 1–3 are complete. All 19 final files were delivered to C:/Develop/maltlock after checking the five original modification hashes. Its build passes; 17 runtime artifacts match the tested build exactly, with three nonmaterial metadata/whitespace differences inspected separately. Existing nimi.ts/nimi.test.ts changes retain their original hashes. The local branch/worktree is kept for recovery under the accepted no-push/no-merge delivery plan.
+
+Rulings, review details and precise artifact/verification limits: [implementation report](../reports/2026-10-14-maltlock-results-crawling-ui.md).
