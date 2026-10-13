@@ -222,14 +222,14 @@ function App() {
   const [status, setStatus] = useState<StatusState>(DEFAULT_STATUS)
   const [view, setView] = useState<'results' | 'crawl'>('results')
   const [isCrawling, setIsCrawling] = useState(false)
-  const [twidougaCrawlMode, setTwidougaCrawlMode] = useState('current')
+  const [twidougaCrawlMode, setTwidougaCrawlMode] = useState('all')
   const [nimiCrawlMode, setNimiCrawlMode] = useState('all')
   const [nimiSourceFilter, setNimiSourceFilter] = useState<NimiPlatform | ''>('')
   const activeSourceFilter = activeSiteId === 'nimi-tw-ranking' ? nimiSourceFilter || undefined : undefined
   const [rangeCrawlSettings, setRangeCrawlSettings] = useState<Record<string, { mode: string; startPage: string; endPage: string }>>({
-    'kone-pornvideo-hot': { mode: 'current', startPage: '1', endPage: '5' },
-    'kissjav-most-popular-week': { mode: 'current', startPage: '1', endPage: '3' },
-    'missav-weekly-views': { mode: 'current', startPage: '1', endPage: '3' },
+    'kone-pornvideo-hot': { mode: 'all', startPage: '1', endPage: '5' },
+    'kissjav-most-popular-week': { mode: 'all', startPage: '1', endPage: '3' },
+    'missav-weekly-views': { mode: 'all', startPage: '1', endPage: '3' },
   })
   const activeRangeSettings = rangeCrawlSettings[activeSiteId]
   const [isStoppingCrawl, setIsStoppingCrawl] = useState(false)

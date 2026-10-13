@@ -41,6 +41,17 @@ it('shows loading before distinguishing an empty saved library', async () => {
   expect(host.querySelector('#step-list')?.textContent).toContain('아직 저장된 항목이 없습니다.')
 })
 
+it.each(['Kone', 'KissJAV', '123AV', 'TwiDouga', 'NimiWiki'])('defaults %s to automatic collection', async (siteName) => {
+  await act(async () => { flushSync(() => root.render(createElement(App))) })
+  const site = Array.from(host.querySelectorAll<HTMLButtonElement>('.site-grid button'))
+    .find((button) => button.querySelector('.chip-label')?.textContent === siteName)!
+  await act(async () => site.click())
+  await act(async () => host.querySelector<HTMLButtonElement>('#tab-crawl')!.click())
+  const range = host.querySelector<HTMLSelectElement>('#step-crawl select')!
+  expect(range.value).toBe('all')
+  expect(range.selectedIndex).toBe(siteName === 'NimiWiki' ? 0 : 1)
+})
+
 it('shows a saved-data error instead of calling a failed read empty', async () => {
   vi.spyOn(repository, 'listItemsBySite').mockRejectedValue(new Error('IndexedDB read failed'))
   await act(async () => { flushSync(() => root.render(createElement(App))) })

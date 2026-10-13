@@ -53,6 +53,7 @@ test('one click moves to the configured site, saves items and returns to results
     await panel.getByRole('button', { name: /^Kone\b/ }).click()
     expect(site.url()).toBe('about:blank')
     await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+    await panel.getByLabel('코네 수집 범위').selectOption('current')
     await panel.getByRole('button', { name: '크롤링 시작', exact: true }).click()
     await expect(site).toHaveURL('https://kone.gg/s/pornvideo?mode=hot')
     await expect(panel.locator('#step-list')).toBeVisible()
@@ -61,6 +62,40 @@ test('one click moves to the configured site, saves items and returns to results
     expect(saved.every((item) => item.siteId === 'kone-pornvideo-hot')).toBe(true)
     await expect(panel.locator('.item-row')).toHaveCount(saved.length)
     await expect(panel.getByRole('status')).toContainText(`신규 ${saved.length}건`)
+  } finally { await context.close() }
+})
+
+test('default range collects all five Kone pages without changing the scope selector', async () => {
+  const context = await launchExtensionContext()
+  const visits: number[] = []
+  await context.route('https://kone.gg/**', (route) => {
+    const page = Number(new URL(route.request().url()).searchParams.get('p') ?? '1')
+    visits.push(page)
+    const links = [1, 2, 3, 4, 5].map((p) => `<a href="?mode=hot&p=${p}" ${p === page ? 'aria-current="page"' : ''}>${p}</a>`).join('')
+    return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><body>
+      <a class="group/article" href="/s/pornvideo/default-${page}?mode=hot"><div title="Default page ${page}"></div></a>
+      <nav aria-label="Pagination">${links}${page < 5 ? `<a aria-label="Next page" href="?mode=hot&p=${page + 1}">Next</a>` : ''}</nav>
+    </body></html>` })
+  })
+  try {
+    const id = await getExtensionId(context)
+    const panel = await context.newPage()
+    await panel.goto(`chrome-extension://${id}/sidepanel.html`)
+    await resetExtensionData(panel)
+    const site = await context.newPage()
+    await site.bringToFront()
+    await panel.getByRole('button', { name: /^Kone\b/ }).click()
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+    await expect(panel.getByLabel('코네 수집 범위')).toHaveValue('all')
+    await expect(panel.getByLabel('시작 페이지', { exact: true })).toHaveValue('1')
+    await expect(panel.getByLabel('끝 페이지', { exact: true })).toHaveValue('5')
+    await panel.getByRole('button', { name: '크롤링 시작', exact: true }).click()
+    await expect(panel.getByRole('status').first()).toContainText('범위 수집 완료 (1–5페이지) · 5페이지 처리 · 신규 5건 저장', { timeout: 25_000 })
+    await expect(panel.locator('#step-list')).toBeVisible()
+    expect(visits).toEqual([1, 2, 3, 4, 5])
+    const saved = await readSavedItems(panel)
+    expect(saved.map((item) => item.title).sort()).toEqual([1, 2, 3, 4, 5].map((page) => `Default page ${page}`))
+    await expect(panel.locator('.item-row')).toHaveCount(5)
   } finally { await context.close() }
 })
 
@@ -78,6 +113,8 @@ test('crawling reloads the document when adding, changing or repeating a URL fra
     await site.goto(url)
     await site.bringToFront()
     await panel.getByRole('button', { name: /^Kone\b/ }).click()
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+    await panel.getByLabel('코네 수집 범위').selectOption('current')
     const readDocumentId = () => context.serviceWorkers()[0].evaluate(async () => {
       const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
       const [snapshot] = await chrome.scripting.executeScript({ target: { tabId: tab.id! }, func: () => location.href })
@@ -778,8 +815,9 @@ for (const target of [
         db.close()
         return rows.map(({ siteId, title, url, previewImageUrl }) => ({ siteId, title, url, previewImageUrl }))
       })
-      await expect(panel.getByLabel(`${target.name} 수집 범위`)).toHaveValue('current')
       await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+      await expect(panel.getByLabel(`${target.name} 수집 범위`)).toHaveValue('all')
+      await panel.getByLabel(`${target.name} 수집 범위`).selectOption('current')
       if (isKiss) initialDocumentRequests = documentRequests
       await start.click()
       await expect(status).toContainText('신규 1건')
@@ -1166,6 +1204,7 @@ test('Kone collects the current list after navigation and deduplicates shifted a
     await panel.getByRole('button', { name: /Kone/ }).click()
     await expect(site.getByRole('button', { name: 'Next page' })).toBeVisible()
     await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+    await panel.getByLabel('코네 수집 범위').selectOption('current')
     await panel.getByRole('button', { name: '크롤링 시작', exact: true }).click()
     await expect(panel.getByRole('status').first()).toContainText('2건 파싱, 신규 2건')
     await expect(panel.locator('#step-list')).toBeVisible()
@@ -1291,6 +1330,7 @@ test('Kone automatic collection scans duplicate pages, keeps its tab, and preser
     await panel.getByRole('button', { name: /Kone/ }).click()
     const start = panel.getByRole('button', { name: '크롤링 시작', exact: true })
     await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+    await panel.getByLabel('코네 수집 범위').selectOption('current')
     await start.click()
     await expect(panel.getByRole('status').first()).toContainText('신규 1건')
     await expect(panel.locator('#step-list')).toBeVisible()
@@ -1450,8 +1490,9 @@ test('TwiDouga automatic collection follows 11–20 even after duplicates and sa
       db.close()
       return rows.map(({ url, title, summary, previewImageUrl }) => ({ url, title, summary, previewImageUrl }))
     })
-    await expect(panel.getByLabel('TwiDouga 수집 범위')).toHaveValue('current')
     await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+    await expect(panel.getByLabel('TwiDouga 수집 범위')).toHaveValue('all')
+    await panel.getByLabel('TwiDouga 수집 범위').selectOption('current')
     await start.click()
     await expect(status).toContainText('신규 1건')
     await expect(panel.locator('#step-list')).toBeVisible()
