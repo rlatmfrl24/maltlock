@@ -262,6 +262,9 @@ test('NimiWiki cycles weekly platforms, persists sources, filters before the lim
   let empty = ''
   let slow = ''
   await context.route(`${origin}/**`, (route) => {
+    if (new URL(route.request().url()).pathname.startsWith('/watch/')) {
+      return route.fulfill({ contentType: 'text/html', body: '<html><body><video controls></video></body></html>' })
+    }
     const platform = new URL(route.request().url()).pathname.split('/')[1]
     visits.push(platform)
     return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><body>
@@ -309,6 +312,26 @@ test('NimiWiki cycles weekly platforms, persists sources, filters before the lim
       await expect(panel.locator('.source-platform').first()).toHaveText(`NimiWiki · ${labels[index]}`)
       await expect(panel.locator('#step-list .section-heading')).toContainText('2건')
     }
+    const firstBlueskyRow = panel.locator('.item-row').first()
+    const firstBlueskyId = await firstBlueskyRow.locator('.item-delete').getAttribute('data-item-id')
+    const firstBluesky = saved.find((item) => item.id === firstBlueskyId)!
+    const viewerUrl = `${origin}/watch/${firstBluesky.dedupeKey!.slice('nimi:bs:item:'.length)}`
+    const preview = firstBlueskyRow.getByRole('link', { name: /영상 미리보기$/ })
+    await expect(preview).toHaveAttribute('href', viewerUrl)
+    await expect(firstBlueskyRow.locator('.item-title')).toHaveAttribute('href', firstBluesky.summary!)
+    const downloads: string[] = []
+    site.on('download', (download) => downloads.push(download.suggestedFilename()))
+    await preview.click()
+    await expect(site).toHaveURL(viewerUrl)
+    await expect(site.locator('video')).toHaveAttribute('controls', '')
+    const newPage = context.waitForEvent('page')
+    await preview.click({ button: 'middle' })
+    const newViewer = await newPage
+    await expect(newViewer).toHaveURL(viewerUrl)
+    await newViewer.close()
+    expect(downloads).toEqual([])
+    expect((await readSavedItems(panel)).find((item) => item.id === firstBlueskyId)?.url).toBe(firstBluesky.url)
+    await site.goto(`${origin}/bs/ranking?sort=plays&period=week`)
     await panel.getByLabel('NimiWiki 출처 필터').selectOption('ig')
     await panel.getByRole('button', { name: '현재 출처 전체 선택', exact: true }).click()
     await panel.getByLabel('NimiWiki 출처 필터').selectOption('tt')
@@ -445,6 +468,18 @@ test('NimiWiki live weekly collection reaches all platforms and persists their A
     await expect(panel.locator('.source-platform').first()).toHaveText('NimiWiki · 블루스카이')
     await expect(site).toHaveURL('https://video1.nimi.wiki/bs/ranking?sort=plays&period=week')
     await panel.setViewportSize({ width: 400, height: 600 })
+    const preview = panel.locator('.item-url').first()
+    const previewUrl = await preview.getAttribute('href')
+    expect(previewUrl).toMatch(/^https:\/\/video1\.nimi\.wiki\/watch\/[\w-]+$/)
+    const downloads: string[] = []
+    site.on('download', (download) => downloads.push(download.suggestedFilename()))
+    await preview.click()
+    await expect(site).toHaveURL(previewUrl!)
+    await site.waitForFunction(() => (document.querySelector('video')?.readyState ?? 0) >= 1, null, { timeout: 25_000 })
+    await site.locator('video').evaluate(async (video: HTMLVideoElement) => { video.muted = true; await video.play() })
+    await site.waitForFunction(() => (document.querySelector('video')?.currentTime ?? 0) > 0, null, { timeout: 10_000 })
+    expect(downloads).toEqual([])
+    console.log('LIVE_NIMI Bluesky preview: web viewer opened, playback advanced, no download')
     const remove = panel.locator('.item-delete').first()
     const removedId = await remove.getAttribute('data-item-id')
     await panel.locator('.item-url').first().focus()
@@ -772,6 +807,7 @@ test('step views keep the list usable in a short panel without moving the browsi
         transaction.objectStore('items').put({
           id: `browse-nimi-${i}`, siteId: 'nimi-tw-ranking', title: `주간 인기 목록에서 수집한 영상 ${i}`,
           url: `https://media.test/review-${i}.mp4`, summary: `https://www.instagram.com/reel/review-${i}/`,
+          previewImageUrl: i === 29 ? `chrome-extension://${location.host}/icons/maltlock-128.png` : undefined,
           sourcePlatform: 'ig', crawledAt: Date.now() + i,
         })
       }
@@ -814,7 +850,7 @@ test('step views keep the list usable in a short panel without moving the browsi
     await expect(panel.getByAltText('Thumbnail reconnect smoke item')).toBeVisible()
     await expect(site).toHaveURL('https://other.test/keep')
 
-    // Dense rows must preserve both destinations, visible source, selection, and keyboard controls.
+    // Large previews must preserve both destinations, source, selection, and keyboard controls.
     await panel.getByLabel('목록 사이트').selectOption('nimi-tw-ranking')
     await expect(panel.locator('.item-row')).toHaveCount(30)
     const first = panel.locator('.item-row').first()
@@ -824,15 +860,14 @@ test('step views keep the list usable in a short panel without moving the browsi
     await expect(first.locator('.item-summary')).toHaveCount(0)
     for (const viewport of [{ width: 400, height: 600 }, { width: 320, height: 480 }, { width: 280, height: 400 }]) {
       await panel.setViewportSize(viewport)
-      const density = await panel.locator('.item-list').evaluate((list) => {
-        const box = list.getBoundingClientRect()
-        const rows = [...list.querySelectorAll('.item-row')].map((row) => row.getBoundingClientRect())
-        return { rowHeight: rows[0].height, visible: rows.filter((row) => row.top >= box.top && row.bottom <= box.bottom).length }
-      })
-      expect(density.rowHeight).toBeLessThan(115)
-      expect(density.visible).toBeGreaterThanOrEqual(viewport.height === 600 ? 3 : viewport.height === 480 ? 2 : 1)
+      const preview = first.locator('.item-preview')
+      const previewBox = await preview.boundingBox()
+      expect(previewBox!.width).toBeGreaterThan(viewport.width * .7)
+      expect(previewBox!.height).toBeGreaterThanOrEqual(100)
+      expect(await preview.evaluate((image) => getComputedStyle(image).objectFit)).toBe('contain')
       expect(await panel.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width)
       const remove = first.getByRole('button', { name: '주간 인기 목록에서 수집한 영상 29 삭제', exact: true })
+      await remove.scrollIntoViewIfNeeded()
       await expect(remove).toBeInViewport()
       const removeBox = await remove.boundingBox()
       expect(removeBox!.width).toBeGreaterThanOrEqual(44)
@@ -841,6 +876,11 @@ test('step views keep the list usable in a short panel without moving the browsi
       expect(selectionBox!.width).toBeGreaterThanOrEqual(24)
       expect(selectionBox!.height).toBeGreaterThanOrEqual(44)
     }
+    await panel.setViewportSize({ width: 800, height: 800 })
+    const firstPreview = await first.locator('.item-preview').boundingBox()
+    const secondPreview = await panel.locator('.item-row').nth(1).locator('.item-preview').boundingBox()
+    expect(firstPreview!.width).toBeGreaterThan(280)
+    expect(secondPreview!.x).toBeGreaterThan(firstPreview!.x + firstPreview!.width)
     await panel.setViewportSize({ width: 320, height: 480 })
     await panel.getByRole('button', { name: '선택 해제', exact: true }).click()
     await panel.getByRole('button', { name: '현재 사이트 전체 선택', exact: true }).click()

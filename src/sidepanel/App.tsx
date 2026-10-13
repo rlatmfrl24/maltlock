@@ -24,7 +24,7 @@ import { sendRuntimeRequest } from '../extension/runtime-client'
 import { crawlRangePages } from '../extension/range-auto-crawl'
 import { crawlTwidougaPages } from '../extension/twidouga-auto-crawl'
 import { crawlNimiPlatforms } from '../extension/nimi-auto-crawl'
-import { getItemSourcePlatform, NIMI_PLATFORMS, NIMI_PLATFORM_LABELS } from '../extension/nimi'
+import { getItemSourcePlatform, getNimiVideoPageUrl, NIMI_PLATFORMS, NIMI_PLATFORM_LABELS } from '../extension/nimi'
 import type { AutoCrawlProgress } from '../extension/auto-crawl'
 import { hasConsecutiveParserFailures } from '../extension/crawl-diagnostics'
 import { decompressDiagnosticPayload } from '../extension/diagnostic-artifacts'
@@ -171,7 +171,7 @@ function getTitleLinkUrl(item: CrawledItem): string {
     return item.summary
   }
 
-  return item.url
+  return getNimiVideoPageUrl(item) ?? item.url
 }
 
 function getRunStatusLabel(run: CrawlRun): string {
@@ -728,6 +728,9 @@ function App() {
     return items.map((item, index) => {
       const sourcePlatform = getItemSourcePlatform(item)
       const titleLinkUrl = getTitleLinkUrl(item)
+      const videoPageUrl = getNimiVideoPageUrl(item)
+      const videoLinkUrl = videoPageUrl ?? item.url
+      const videoLinkLabel = videoPageUrl ? '영상 미리보기' : '영상 열기'
 
       return (
         <li key={item.id} className={`item-row${selectedItemIds.has(item.id) ? ' item-row-selected' : ''}`}>
@@ -737,20 +740,27 @@ function App() {
                 checked={selectedItemIds.has(item.id)} disabled={isBulkDeleting || !!pendingDeletion}
                 onChange={(event) => handleSelectItem(item.id, event.target.checked)} />
             </label>
+            <a
+              href={titleLinkUrl}
+              className="item-title"
+              title={`${item.title}\n${titleLinkUrl}`}
+              onClick={(event) => {
+                handleItemLinkClick(event, titleLinkUrl)
+              }}
+              onAuxClick={(event) => {
+                handleItemLinkAuxClick(event, titleLinkUrl)
+              }}
+            >
+              {item.title}
+            </a>
+            {!isPrivacyMode ? (
+              <div className="item-media">
+                {item.previewImageUrl ? (
+                  <CachedThumbnail itemId={item.id} sourceUrl={item.previewImageUrl} title={item.title} />
+                ) : <div className="item-preview item-preview-empty">No Image</div>}
+              </div>
+            ) : null}
             <div className="item-content">
-              <a
-                href={titleLinkUrl}
-                className="item-title"
-                title={`${item.title}\n${titleLinkUrl}`}
-                onClick={(event) => {
-                  handleItemLinkClick(event, titleLinkUrl)
-                }}
-                onAuxClick={(event) => {
-                  handleItemLinkAuxClick(event, titleLinkUrl)
-                }}
-              >
-                {item.title}
-              </a>
               {item.siteId === 'nimi-tw-ranking' ? (
                 <span className="meta-tag source-platform">NimiWiki · {sourcePlatform ? NIMI_PLATFORM_LABELS[sourcePlatform] : '출처 미확인'}</span>
               ) : null}
@@ -759,26 +769,21 @@ function App() {
                   {item.summary}
                 </span>
               ) : null}
-              <time className="item-date" dateTime={new Date(item.crawledAt).toISOString()}
-                title={`수집: ${formatDateTime(item.crawledAt)}`} aria-label={`수집: ${formatDateTime(item.crawledAt)}`}>
-                {ITEM_DATE_FORMATTER.format(item.crawledAt)}
-              </time>
-            </div>
-            {!isPrivacyMode || titleLinkUrl !== item.url ? (
-              <div className="item-media">
-                {!isPrivacyMode ? item.previewImageUrl ? (
-                  <CachedThumbnail itemId={item.id} sourceUrl={item.previewImageUrl} title={item.title} />
-                ) : <div className="item-preview item-preview-empty">No Image</div> : null}
-                {titleLinkUrl !== item.url ? (
-                  <a href={item.url} className="item-url" title={item.url}
-                    aria-label={`${item.title} 영상 열기`}
-                    onClick={(event) => handleItemLinkClick(event, item.url)}
-                    onAuxClick={(event) => handleItemLinkAuxClick(event, item.url)}>
-                    영상 열기
+              <div className="item-meta">
+                <time className="item-date" dateTime={new Date(item.crawledAt).toISOString()}
+                  title={`수집: ${formatDateTime(item.crawledAt)}`} aria-label={`수집: ${formatDateTime(item.crawledAt)}`}>
+                  {ITEM_DATE_FORMATTER.format(item.crawledAt)}
+                </time>
+                {titleLinkUrl !== videoLinkUrl ? (
+                  <a href={videoLinkUrl} className="item-url" title={videoLinkUrl}
+                    aria-label={`${item.title} ${videoLinkLabel}`}
+                    onClick={(event) => handleItemLinkClick(event, videoLinkUrl)}
+                    onAuxClick={(event) => handleItemLinkAuxClick(event, videoLinkUrl)}>
+                    {videoLinkLabel}
                   </a>
                 ) : null}
               </div>
-            ) : null}
+            </div>
             <button type="button" className="delete-button item-delete" data-item-id={item.id}
               aria-label={`${item.title} ${deletingItemId === item.id ? '삭제 중' : '삭제'}`}
               aria-busy={deletingItemId === item.id}

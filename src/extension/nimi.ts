@@ -37,6 +37,18 @@ export function getItemSourcePlatform(item: Pick<CrawledItem, 'siteId' | 'source
   return undefined
 }
 
+export function getNimiVideoPageUrl(item: Pick<CrawledItem, 'siteId' | 'sourcePlatform' | 'url' | 'summary' | 'previewImageUrl' | 'dedupeKey' | 'identities'>): string | undefined {
+  if (getItemSourcePlatform(item) !== 'bs') return undefined
+  const keys = [item.dedupeKey, ...(item.identities ?? [])
+    .filter((identity) => identity.kind === 'source-id' && identity.scope === 'site')
+    .map((identity) => identity.value)]
+  for (const key of keys) {
+    const id = key?.match(/^nimi:bs:item:([a-zA-Z0-9_-]+)$/)?.[1]
+    if (id) return `https://video1.nimi.wiki/watch/${id}`
+  }
+  return undefined
+}
+
 export type NimiView = 'ranking' | 'realtime' | 'recent'
 export type NimiPeriod = 'hourly' | 'daily' | 'weekly' | 'monthly' | 'yearly'
 type NimiApiPeriod = 'hour' | 'day' | 'week' | 'month' | 'year'
