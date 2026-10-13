@@ -58,4 +58,6 @@
 
 원본 빌드의 런타임 파일 17개(실제 확장 manifest, JS/CSS, PNG 등)는 실제 검증한 작업 트리 빌드와 SHA-256이 같다. 나머지 세 파일은 HTML의 태그 사이 공백, SVG의 줄바꿈, Vite 개발 manifest의 작업 경로에 따른 가상 entry 차이뿐이었다. 각각 내용 비교로 확인했으며 사용자에게 실행되는 코드 차이는 없다.
 
-구현과 리뷰 수정은 완료했고 로컬 복구용 브랜치와 작업 트리는 보존했다. task ledger와 실제 실행 로그·스크린샷은 `C:/Users/rlatm/.codex/visualizations/2026/10/13/01a13738-5d44-7fd1-a9a6-9972defd84d5/maltlock-ui-verification`에 보존한다. 이 계획의 임시 작업 디렉터리는 경로 확인 후 정리한다.
+구현과 리뷰 수정은 완료했고 로컬 복구용 브랜치와 작업 트리는 보존했다. task ledger와 실제 실행 로그·스크린샷은 `C:/Users/rlatm/.codex/visualizations/2026/10/13/01a13738-5d44-7fd1-a9a6-9972defd84d5/maltlock-ui-verification`에 보존한다.
+
+계획의 임시 작업 폴더 `.superpowers/sdd/2026-10-14-maltlock-results-crawling-ui`를 경로 검증 후 재귀 삭제하려 했지만 자동 정책 검토가 `blocked by policy`로 실행을 거부했다. 명령은 시작되지 않았고 폴더를 보존했다. 원본 제품 코드·빌드·데이터 동작에는 영향이 없으며 임시 폴더 정리 단계만 남았다. 실행 스킬의 "Final review clean: delete this plan's workspace" 단계는 이 정책 제한으로 수행하지 못했다.
