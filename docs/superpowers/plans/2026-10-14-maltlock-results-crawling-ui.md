@@ -45,3 +45,11 @@ Interfaces: shared activeSiteId; view is results or crawl; all terminal outcomes
 - Same-URL reloads cannot capture an old document; hung snapshots must have a deadline.
 - Ending with only duplicates, partial saves, cancellation or errors must show accurate cumulative results without claiming new data.
 - Existing local NimiWiki video-link and thumbnail-layout changes must survive delivery.
+
+## Execution evidence
+
+Tasks 1 and 2 were delivered atomically in cfcb997 to keep the required document metadata and its UI consumer consistent. A fresh whole-change review found one important hash-navigation defect and no critical/minor findings. The one fix pass in 8a5ac32 proves a new document for hash addition, change and identical-URL retry.
+
+Final check: 25 unit files / 155 tests, TypeScript, ESLint and build pass. Full regular E2E on cfcb997: 18 pass. The affected navigation/stop/timeout subset passed after the first review fix; final 8a5ac32 start/hash E2E: 2 pass. Final live NimiWiki start-button flow: 400 saved items, 4 successful persisted runs, API-to-storage missing items 0, actual thumbnail/viewer playback and safe deletion pass.
+
+Rulings, review details and precise artifact/verification limits: [implementation report](../reports/2026-10-14-maltlock-results-crawling-ui.md). Original delivery and final readback are recorded there when completed.
