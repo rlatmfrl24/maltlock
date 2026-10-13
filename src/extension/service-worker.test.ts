@@ -30,6 +30,7 @@ beforeEach(async () => {
         tab.status = 'loading'
         return { ...tab }
       },
+      reload: vi.fn(async () => { tab.status = 'loading' }),
       onActivated: event, onUpdated: event,
     },
     scripting: { executeScript: async () => blockSnapshot ? new Promise(() => {}) : emptyFirstSnapshot && snapshots++ === 0 ? [] : [{
@@ -64,6 +65,7 @@ it('waits for a new ready document even when reopening the same URL', async () =
   await vi.advanceTimersByTimeAsync(500)
   expect(request.response()).toBeUndefined()
   documentId = 'new-document'
+  tab.status = 'complete'
   ready = false
   await vi.advanceTimersByTimeAsync(500)
   expect(request.response()).toBeUndefined()
@@ -72,6 +74,26 @@ it('waits for a new ready document even when reopening the same URL', async () =
   expect(await request.task).toEqual({ ok: true, data: {
     siteId: 'kone-pornvideo-hot', tabId: 7, url: targetUrl, documentId: 'new-document',
   } })
+})
+
+it.each([
+  [targetUrl, `${targetUrl}#new`, 1],
+  [`${targetUrl}#old`, `${targetUrl}#new`, 1],
+  [`${targetUrl}#same`, `${targetUrl}#same`, 1],
+])('requires a new document when opening %s as %s', async (previousUrl, nextUrl, reloads) => {
+  tab.url = previousUrl
+  const request = openSite('kone-pornvideo-hot', nextUrl)
+  await vi.advanceTimersByTimeAsync(10)
+  tab.url = nextUrl
+  tab.status = 'complete'
+  delete tab.pendingUrl
+  await vi.advanceTimersByTimeAsync(500)
+  expect(request.response()).toBeUndefined()
+  expect(chrome.tabs.reload).toHaveBeenCalledTimes(reloads)
+  documentId = 'new-document'
+  tab.status = 'complete'
+  await vi.advanceTimersByTimeAsync(500)
+  expect(await request.task).toMatchObject({ ok: true, data: { url: nextUrl, documentId: 'new-document' } })
 })
 
 it('rejects a user navigation during target preparation without replacing it', async () => {

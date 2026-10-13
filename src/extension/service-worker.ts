@@ -226,9 +226,10 @@ async function openTargetSite(
       target: { tabId: activeTab.id },
       func: () => ({ url: location.href, ready: document.readyState === 'complete' }),
     }), deadline - Date.now(), signal)
-    // A same-URL navigation must replace the old document before capture.
-    const before = activeTab.url === nextUrl ? (await snapshot())[0] : undefined
-    if (activeTab.url === nextUrl && !before?.documentId) {
+    // Fragment navigation can keep the same document, so compare its identity too.
+    const sameResource = activeTab.url.split('#')[0] === nextUrl.split('#')[0]
+    const before = sameResource ? (await snapshot())[0] : undefined
+    if (sameResource && !before?.documentId) {
       throw new CrawlFailure('CONTENT_SCRIPT_UNAVAILABLE', '사이트 이동 전에 현재 페이지의 문서를 확인하지 못했습니다.')
     }
     const current = await chrome.tabs.get(activeTab.id)
@@ -244,6 +245,7 @@ async function openTargetSite(
       active: true,
     })
     let committed = false
+    let reloaded = false
     while (Date.now() < deadline) {
       signal.throwIfAborted()
       const loading = await chrome.tabs.get(activeTab.id)
@@ -260,6 +262,11 @@ async function openTargetSite(
         const latest = await chrome.tabs.get(activeTab.id)
         if (latest.url !== nextUrl || (latest.pendingUrl && latest.pendingUrl !== nextUrl)) {
           throw new CrawlFailure('TAB_URL_MISMATCH', '수집 중 대상 페이지가 변경되었습니다.')
+        }
+        if (before && document.documentId === before.documentId && !reloaded) {
+          signal.throwIfAborted()
+          await chrome.tabs.reload(activeTab.id)
+          reloaded = true
         }
         if (document.documentId && document.documentId !== before?.documentId && document.result.ready) {
           signal.throwIfAborted()

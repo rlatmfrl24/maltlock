@@ -2,7 +2,7 @@ import path from 'node:path'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { chromium, expect, test, type BrowserContext } from '@playwright/test'
-import type { CrawledItem } from '../src/types/contracts'
+import type { CrawledItem, CrawlRun } from '../src/types/contracts'
 import { nimiTwRankingParser } from '../src/parsers/nimi-tw-ranking.parser'
 
 type ReviewSnapshotGate = typeof globalThis & { snapshotWaiting?: boolean; releaseSnapshot?: () => void }
@@ -61,6 +61,43 @@ test('one click moves to the configured site, saves items and returns to results
     expect(saved.every((item) => item.siteId === 'kone-pornvideo-hot')).toBe(true)
     await expect(panel.locator('.item-row')).toHaveCount(saved.length)
     await expect(panel.getByRole('status')).toContainText(`신규 ${saved.length}건`)
+  } finally { await context.close() }
+})
+
+test('crawling reloads the document when adding, changing or repeating a URL fragment', async () => {
+  const context = await launchExtensionContext()
+  const listing = readFileSync(path.resolve('src/test/fixtures/parsers/kone_new.html'), 'utf8')
+  await context.route('https://kone.gg/**', (route) => route.fulfill({ contentType: 'text/html', body: listing }))
+  try {
+    const id = await getExtensionId(context)
+    const panel = await context.newPage()
+    await panel.goto(`chrome-extension://${id}/sidepanel.html`)
+    await resetExtensionData(panel)
+    const site = await context.newPage()
+    const url = 'https://kone.gg/s/pornvideo?mode=hot'
+    await site.goto(url)
+    await site.bringToFront()
+    await panel.getByRole('button', { name: /^Kone\b/ }).click()
+    const readDocumentId = () => context.serviceWorkers()[0].evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+      const [snapshot] = await chrome.scripting.executeScript({ target: { tabId: tab.id! }, func: () => location.href })
+      return snapshot.documentId
+    })
+    for (const fragment of ['first', 'second', 'second']) {
+      const before = await readDocumentId()
+      await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+      if (await panel.locator('.site-settings').getAttribute('open') === null) {
+        await panel.getByText('사이트 주소 설정', { exact: false }).click()
+      }
+      await panel.locator('#site-url-input').fill(`${url}#${fragment}`)
+      await panel.getByRole('button', { name: '크롤링 시작', exact: true }).click()
+      await expect(panel.locator('#step-list')).toBeVisible()
+      await expect(site).toHaveURL(`${url}#${fragment}`)
+      expect(await readDocumentId()).not.toBe(before)
+      const saved = await readSavedItems(panel)
+      expect(saved.length).toBeGreaterThan(0)
+      await expect(panel.locator('.item-row')).toHaveCount(saved.length)
+    }
   } finally { await context.close() }
 })
 
@@ -531,6 +568,24 @@ test('NimiWiki live weekly collection reaches all platforms and persists their A
       expect(missing).toHaveLength(0)
       console.log(`LIVE_NIMI ${platform}: parsed=${expectedItems.length}, saved=${rows.length}, missing=${missing.length}`)
     }
+    const runs = await panel.evaluate(async () => {
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open('maltlock-db')
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error)
+      })
+      const rows = await new Promise<CrawlRun[]>((resolve, reject) => {
+        const request = database.transaction('crawlRuns').objectStore('crawlRuns').getAll()
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error)
+      })
+      database.close()
+      return rows
+    })
+    expect(runs).toHaveLength(4)
+    expect(runs.every((run) => run.status === 'success' && run.parsedCount! > 0 && run.insertedCount! > 0)).toBe(true)
+    expect(runs.reduce((total, run) => total + run.insertedCount!, 0)).toBe(saved.length)
+    console.log(`LIVE_NIMI runs: ${runs.length} successful persisted runs, ${saved.length} total inserts`)
     await expect(panel.locator('#step-list')).toBeVisible()
     await panel.getByLabel('NimiWiki 출처 필터').selectOption('bs')
     await expect(panel.locator('.source-platform').first()).toHaveText('NimiWiki · 블루스카이')
