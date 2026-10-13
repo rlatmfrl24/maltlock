@@ -36,7 +36,7 @@ it.each([[true, false], [false, false], [true, true]])('bounds lost navigation r
     } },
   })
   let result: Awaited<ReturnType<typeof crawlRangePages>> | undefined
-  const task = crawlRangePages({ siteId: 'kissjav-most-popular-week', targetUrl,
+  const task = crawlRangePages({ siteId: 'kissjav-most-popular-week', targetUrl, tabId: 7, documentId: 'document-1',
     startPage: 1, endPage: 3, captureFailurePayload: false,
     signal: new AbortController().signal, onProgress: () => {},
   }).then((value) => { result = value })
@@ -83,7 +83,7 @@ it.each(['kone-pornvideo-hot', 'missav-weekly-views', 'twidouga-ranking-t1'].fla
     runtime: { sendMessage: capture },
   })
   const controller = new AbortController()
-  const options = { siteId, targetUrl, startPage: 1, endPage: 1,
+  const options = { siteId, targetUrl, tabId: 7, documentId: 'document-0', startPage: 1, endPage: 1,
     captureFailurePayload: false, signal: controller.signal, onProgress: () => {} }
   let result: Awaited<ReturnType<typeof crawlRangePages>> | undefined
   const task = (siteId === 'twidouga-ranking-t1' ? crawlTwidougaPages(options) : crawlRangePages(options))

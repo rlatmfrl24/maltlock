@@ -22,6 +22,8 @@ function sameUrl(first: string | undefined, second: string): boolean {
 }
 
 export async function crawlNimiPlatforms(options: {
+  tabId: number
+  documentId: string
   targetUrl: string
   captureFailurePayload: boolean
   signal: AbortSignal
@@ -32,7 +34,7 @@ export async function crawlNimiPlatforms(options: {
   const report = () => options.onProgress({ ...progress, failures: [...progress.failures] })
   const tabMoved = new Error('수집 탭이 다른 페이지로 이동했습니다. 자동 수집을 중단합니다.')
   try {
-    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+    const tab = await chrome.tabs.get(options.tabId)
     if (tab?.id === undefined || !tab.url || !getNimiPlatform(tab.url) || !getNimiPlatform(options.targetUrl)) {
       throw new Error('NimiWiki 플랫폼 목록에서 자동 수집을 시작해주세요.')
     }
@@ -57,13 +59,17 @@ export async function crawlNimiPlatforms(options: {
           delay(1_500, signal).then(() => []),
         ])
         if (!before?.documentId) throw new Error('수집할 페이지 문서를 확인하지 못했습니다.')
+        if (index === 0 && before.documentId !== options.documentId) throw tabMoved
         const latest = await chrome.tabs.get(tab.id)
         if ((!sameUrl(before.result, previousUrl) && !sameUrl(before.result, previousPendingUrl ?? previousUrl)) ||
           !sameUrl(latest.url, before.result!) ||
           (latest.pendingUrl && !sameUrl(latest.pendingUrl, previousPendingUrl ?? previousUrl))) throw tabMoved
         signal.throwIfAborted()
-        if (sameUrl(before.result, url)) await chrome.tabs.reload(tab.id)
-        else await chrome.tabs.update(tab.id, { url })
+        const prepared = index === 0 && sameUrl(before.result, url)
+        if (!prepared) {
+          if (sameUrl(before.result, url)) await chrome.tabs.reload(tab.id)
+          else await chrome.tabs.update(tab.id, { url })
+        }
         navigated = true
         const deadline = Date.now() + 15_000
         let state: { documentId: string; url: string } | undefined
@@ -80,7 +86,7 @@ export async function crawlNimiPlatforms(options: {
               }) }).catch(() => []),
               delay(Math.min(1_500, Math.max(1, deadline - Date.now())), signal).then(() => []),
             ])
-            if (snapshot?.documentId && snapshot.documentId !== before.documentId && snapshot.result?.ready && sameUrl(snapshot.result.url, url)) {
+            if (snapshot?.documentId && (prepared || snapshot.documentId !== before.documentId) && snapshot.result?.ready && sameUrl(snapshot.result.url, url)) {
               state = { documentId: snapshot.documentId, url: snapshot.result.url }
               break
             }

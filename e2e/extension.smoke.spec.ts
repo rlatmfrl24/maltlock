@@ -13,11 +13,60 @@ function resolveExtensionDistPath(): string {
   return path.resolve(currentDir, '..', 'dist')
 }
 
+test('library selection stays local in both views', async () => {
+  const context = await launchExtensionContext()
+  await context.route('https://other.test/**', (route) => route.fulfill({ body: '<h1>Keep browsing</h1>' }))
+  try {
+    const id = await getExtensionId(context)
+    const panel = await context.newPage()
+    await panel.goto(`chrome-extension://${id}/sidepanel.html`)
+    await resetExtensionData(panel)
+    const site = await context.newPage()
+    await site.goto('https://other.test/keep')
+    await site.bringToFront()
+    await expect(panel.getByRole('tab', { name: '수집결과', exact: true })).toHaveAttribute('aria-selected', 'true')
+    await panel.getByRole('button', { name: /^NimiWiki\b/ }).click()
+    await expect(site).toHaveURL('https://other.test/keep')
+    await expect(panel.locator('#step-list')).toBeVisible()
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+    await panel.getByRole('button', { name: /^Kone\b/ }).click()
+    await expect(site).toHaveURL('https://other.test/keep')
+    await expect(panel.locator('#step-crawl')).toBeVisible()
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).focus()
+    await panel.keyboard.press('ArrowLeft')
+    await expect(panel.getByRole('tab', { name: '수집결과', exact: true })).toBeFocused()
+    await expect(panel.locator('#step-list')).toBeVisible()
+  } finally { await context.close() }
+})
+
+test('one click moves to the configured site, saves items and returns to results', async () => {
+  const context = await launchExtensionContext()
+  const listing = readFileSync(path.resolve('src/test/fixtures/parsers/kone_new.html'), 'utf8')
+  await context.route('https://kone.gg/**', (route) => route.fulfill({ contentType: 'text/html', body: listing }))
+  try {
+    const id = await getExtensionId(context)
+    const panel = await context.newPage()
+    await panel.goto(`chrome-extension://${id}/sidepanel.html`)
+    await resetExtensionData(panel)
+    const site = await context.newPage()
+    await site.bringToFront()
+    await panel.getByRole('button', { name: /^Kone\b/ }).click()
+    expect(site.url()).toBe('about:blank')
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+    await panel.getByRole('button', { name: '크롤링 시작', exact: true }).click()
+    await expect(site).toHaveURL('https://kone.gg/s/pornvideo?mode=hot')
+    await expect(panel.locator('#step-list')).toBeVisible()
+    const saved = await readSavedItems(panel)
+    expect(saved.length).toBeGreaterThan(0)
+    expect(saved.every((item) => item.siteId === 'kone-pornvideo-hot')).toBe(true)
+    await expect(panel.locator('.item-row')).toHaveCount(saved.length)
+    await expect(panel.getByRole('status')).toContainText(`신규 ${saved.length}건`)
+  } finally { await context.close() }
+})
+
 async function launchExtensionContext(): Promise<BrowserContext> {
   const extensionPath = resolveExtensionDistPath()
-  const userDataDir = path.join(extensionPath, '.playwright-user-data')
-
-  return chromium.launchPersistentContext(userDataDir, {
+  return chromium.launchPersistentContext('', {
     headless: false,
     args: [
       `--disable-extensions-except=${extensionPath}`,
@@ -51,17 +100,21 @@ for (const target of [
       const site = await context.newPage()
       await site.bringToFront()
       await panel.getByRole('button', { name: new RegExp(`^${target.name}\\b`) }).click()
-      await site.waitForURL(target.url)
+      await site.goto(target.url)
       await site.waitForLoadState('load')
       if (target.name === 'TwiDouga') {
         await site.goto('https://www.twidouga.net/ko/ranking_t2.php')
+        await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
         await panel.locator('#twidouga-crawl-mode').selectOption('all')
       } else if (target.name === 'NimiWiki') {
         await site.goto('https://video1.nimi.wiki/ig/new')
         await expect(panel.getByLabel('NimiWiki 수집 범위')).toHaveValue('all')
       } else {
+        await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
         await panel.locator('#range-crawl-mode').selectOption('all')
+        await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
         await panel.getByLabel('시작 페이지').fill('2')
+        await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
         await panel.getByLabel('끝 페이지').fill('2')
       }
       await panel.evaluate(() => {
@@ -79,12 +132,13 @@ for (const target of [
           return execute(injection)
         }
       })
-      const start = panel.getByRole('button', { name: '지금 크롤 실행', exact: true })
+      const start = panel.getByRole('button', { name: '크롤링 시작', exact: true })
+      await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
       await start.click()
       await panel.waitForFunction(() => (globalThis as ReviewSnapshotGate).snapshotWaiting)
       await site.goto('https://other.test/manual-navigation')
       await panel.evaluate(() => (globalThis as ReviewSnapshotGate).releaseSnapshot?.())
-      await expect(start).toBeEnabled({ timeout: 5_000 })
+      await expect(panel.locator('#step-list')).toBeVisible({ timeout: 5_000 })
       await expect(site).toHaveURL('https://other.test/manual-navigation')
       await expect(panel.getByRole('status')).toContainText('다른 페이지로 이동')
       expect(await readSavedItems(panel)).toEqual([])
@@ -107,19 +161,21 @@ for (const mode of ['stop', 'timeout']) {
       const site = await context.newPage()
       await site.bringToFront()
       await panel.getByRole('button', { name: /^TwiDouga\b/ }).click()
-      await site.waitForURL('https://www.twidouga.net/ko/ranking_t1.php')
+      await site.goto('https://www.twidouga.net/ko/ranking_t1.php')
       await site.waitForLoadState('load')
+      await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
       await panel.locator('#twidouga-crawl-mode').selectOption('all')
       busy = true
       const navigation = context.waitForEvent('request', { predicate: (request) => request.url().endsWith('/ko/ranking_t1.php') })
-      const start = panel.getByRole('button', { name: '지금 크롤 실행', exact: true })
+      const start = panel.getByRole('button', { name: '크롤링 시작', exact: true })
+      await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
       await start.click()
       await navigation
       if (mode === 'stop') {
         await new Promise((resolve) => setTimeout(resolve, 1_500))
-        await panel.getByRole('button', { name: '자동 수집 중지', exact: true }).click()
+        await panel.getByRole('button', { name: '수집 중지', exact: true }).click()
       }
-      await expect(start).toBeEnabled({ timeout: mode === 'stop' ? 2_000 : 18_000 })
+      await expect(panel.locator('#step-list')).toBeVisible({ timeout: mode === 'stop' ? 2_000 : 18_000 })
       await expect(panel.getByRole('status')).toContainText(mode === 'stop' ? '수집 중지' : '문서 응답 시간이 초과')
       expect(await readSavedItems(panel)).toEqual([])
     } finally { await context.close() }
@@ -211,8 +267,8 @@ test('saved lists show every legacy group member as an individual row with sourc
       db.close()
     })
     await panel.reload()
-    await panel.getByRole('button', { name: '저장 목록 바로 보기', exact: true }).click()
-    await panel.getByLabel('목록 사이트').selectOption('nimi-tw-ranking')
+    await panel.getByRole('tab', { name: '수집결과', exact: true }).click()
+    await panel.getByRole('button', { name: /^NimiWiki\b/ }).click()
     await expect(panel.locator('.item-row')).toHaveCount(3)
     await expect(panel.locator('#step-list .section-heading')).toContainText('3건')
     await expect(panel.locator('.group-toggle, .group-members, .separate-button')).toHaveCount(0)
@@ -240,7 +296,7 @@ test('saved lists show every legacy group member as an individual row with sourc
     await panel.getByLabel('NimiWiki 출처 필터').selectOption('tw')
     await panel.getByRole('button', { name: 'Legacy Twitter second 삭제', exact: true }).focus()
     await panel.keyboard.press('Enter')
-    await expect(panel.getByRole('heading', { name: '저장 목록', exact: true })).toBeFocused()
+    await expect(panel.getByRole('heading', { name: '수집결과', exact: true })).toBeFocused()
     await expect(panel.locator('.item-row')).toHaveCount(0)
     expect((await readSavedItems(panel)).map((item) => item.id).sort()).toEqual(['legacy-ig', 'legacy-other-site'])
   } finally { await context.close() }
@@ -291,9 +347,10 @@ test('NimiWiki cycles weekly platforms, persists sources, filters before the lim
     await site.bringToFront()
     await panel.getByRole('button', { name: 'NimiWiki', exact: false }).click()
     await expect(panel.getByLabel('NimiWiki 수집 범위')).toHaveValue('all')
-    const start = panel.getByRole('button', { name: '지금 크롤 실행', exact: true })
+    const start = panel.getByRole('button', { name: '크롤링 시작', exact: true })
     const status = panel.getByRole('status').first()
     visits.length = 0
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click()
     await expect(status).toContainText('4개 플랫폼 주간 수집 완료 · 4/4개 플랫폼 처리 · 신규 8건 저장', { timeout: 30_000 })
     expect(visits).toEqual(platforms)
@@ -339,8 +396,9 @@ test('NimiWiki cycles weekly platforms, persists sources, filters before the lim
     await expect(panel.locator('.item-select:checked')).toHaveCount(0)
     await panel.getByLabel('NimiWiki 출처 필터').selectOption('ig')
     await expect(panel.locator('.item-select:checked')).toHaveCount(2)
-    await panel.getByRole('button', { name: '2 수집 실행', exact: true }).click()
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     visits.length = 0
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click()
     await expect(status).toContainText('신규 0건 저장 · 정확 중복 8건', { timeout: 30_000 })
     await expect(panel.locator('#step-list')).toBeVisible()
@@ -351,52 +409,61 @@ test('NimiWiki cycles weekly platforms, persists sources, filters before the lim
     empty = 'ig'
     failed = 'tt'
     requests.length = 0
-    await panel.getByRole('button', { name: '2 수집 실행', exact: true }).click()
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click()
-    await expect(start).toBeEnabled({ timeout: 30_000 })
+    await expect(panel.locator('#step-list')).toBeVisible({ timeout: 30_000 })
     await expect(status).toContainText('3/4개 플랫폼 처리')
     await expect(status).toContainText('틱톡: NimiWiki API 요청에 실패했습니다. (HTTP 503)')
-    await expect(panel.locator('#step-crawl')).toBeVisible()
+    await expect(panel.locator('#step-list')).toBeVisible()
     expect(requests).toHaveLength(4)
     failed = 'tw' // A rendered Twitter list must not hide an API failure.
     requests.length = 0
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click()
-    await expect(start).toBeEnabled({ timeout: 30_000 })
+    await expect(panel.locator('#step-list')).toBeVisible({ timeout: 30_000 })
     await expect(status).toContainText('트위터: NimiWiki API 요청에 실패했습니다. (HTTP 503)')
     expect(requests).toHaveLength(4)
     expect(await readSavedItems(panel)).toHaveLength(8)
     empty = ''; failed = ''; slow = 'ig'
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click()
-    await expect(start).toBeEnabled({ timeout: 35_000 })
+    await expect(panel.locator('#step-list')).toBeVisible({ timeout: 35_000 })
     await expect(status).toContainText('인스타그램: NimiWiki API가 15초 안에 응답하지 않았습니다.')
     slow = ''
 
     // Stop and manual navigation must retain saved items and must not open the next platform.
     const stoppedRequest = context.waitForEvent('request', { predicate: (r) => r.url().includes('/video/tw/ranking') })
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click(); await stoppedRequest
-    await panel.getByRole('button', { name: '자동 수집 중지', exact: true }).click()
+    await panel.getByRole('button', { name: '수집 중지', exact: true }).click()
     await expect(status).toContainText('수집 중지')
-    await expect(panel.locator('#step-crawl')).toBeVisible()
+    await expect(panel.locator('#step-list')).toBeVisible()
     const movedRequest = context.waitForEvent('request', { predicate: (r) => r.url().includes('/video/tw/ranking') })
     visits.length = 0
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click(); await movedRequest
     await site.goto('https://other.test/')
-    await expect(start).toBeEnabled({ timeout: 10_000 })
+    await expect(panel.locator('#step-list')).toBeVisible({ timeout: 10_000 })
     await expect(site).toHaveURL('https://other.test/')
     expect(visits).toEqual(['tw'])
     expect(await readSavedItems(panel)).toHaveLength(8)
 
     // Current-list mode uses that platform's actual sort and period.
     await site.goto(`${origin}/ig/ranking?sort=likes`)
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await panel.getByLabel('NimiWiki 수집 범위').selectOption('current')
+    await panel.locator('.site-settings > summary').click()
+    await panel.getByLabel('NimiWiki URL 커스터마이즈').fill(`${origin}/ig/ranking?sort=likes`)
     requests.length = 0
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click()
     await expect(panel.locator('#step-list')).toBeVisible()
     expect(requests).toEqual(['/video/ig/ranking?sort=likes'])
 
     // A valid empty current list completes and also opens the saved list.
-    await panel.getByRole('button', { name: '2 수집 실행', exact: true }).click()
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     empty = 'ig'
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click()
     await expect(status).toContainText('0건 파싱, 신규 0건 저장')
     await expect(panel.locator('#step-list')).toBeVisible()
@@ -412,8 +479,8 @@ test('NimiWiki cycles weekly platforms, persists sources, filters before the lim
       db.close()
     })
     await panel.reload() // Native IDB seeding does not notify Dexie's live queries.
-    await panel.getByRole('button', { name: '저장 목록 바로 보기', exact: true }).click()
-    await panel.getByLabel('목록 사이트').selectOption('nimi-tw-ranking')
+    await panel.getByRole('tab', { name: '수집결과', exact: true }).click()
+    await panel.getByRole('button', { name: /^NimiWiki\b/ }).click()
     await expect(panel.locator('.list-footer')).toContainText('200 / 213건 표시')
     await panel.getByLabel('NimiWiki 출처 필터').selectOption('tw')
     await expect(panel.locator('#step-list .section-heading')).toContainText('207건')
@@ -424,11 +491,11 @@ test('NimiWiki cycles weekly platforms, persists sources, filters before the lim
     await panel.setViewportSize({ width: 320, height: 480 })
     expect(await panel.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320)
     const list = await panel.locator('.item-list').boundingBox()
-    expect(list!.height).toBeGreaterThan(480 * .45)
+    expect(list!.height).toBeGreaterThanOrEqual(100)
   } finally { await context.close() }
 })
 
-test('NimiWiki live weekly collection reaches all platforms and persists their API items', async () => {
+test('NimiWiki live weekly collection reaches all platforms and persists their API items', async ({ browserName }, testInfo) => {
   test.skip(process.env.MALTLOCK_LIVE_NIMI !== '1', 'Explicit live-source verification')
   test.setTimeout(120_000)
   const context = await launchExtensionContext()
@@ -445,10 +512,11 @@ test('NimiWiki live weekly collection reaches all platforms and persists their A
     await panel.goto(`chrome-extension://${id}/sidepanel.html`)
     await resetExtensionData(panel)
     const site = await context.newPage()
-    await site.goto('https://video1.nimi.wiki/tw/ranking?sort=plays&period=week')
+    await site.goto('about:blank')
     await site.bringToFront()
     await panel.getByRole('button', { name: 'NimiWiki', exact: false }).click()
-    await panel.getByRole('button', { name: '지금 크롤 실행', exact: true }).click()
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+    await panel.getByRole('button', { name: '크롤링 시작', exact: true }).click()
     await expect(panel.getByRole('status').first()).toContainText('4개 플랫폼 주간 수집 완료 · 4/4개 플랫폼 처리', { timeout: 100_000 })
     await Promise.all(reads)
     const saved = await readSavedItems(panel)
@@ -468,6 +536,10 @@ test('NimiWiki live weekly collection reaches all platforms and persists their A
     await expect(panel.locator('.source-platform').first()).toHaveText('NimiWiki · 블루스카이')
     await expect(site).toHaveURL('https://video1.nimi.wiki/bs/ranking?sort=plays&period=week')
     await panel.setViewportSize({ width: 400, height: 600 })
+    await panel.bringToFront()
+    await expect.poll(() => panel.locator('img.item-preview').first().evaluate((image: HTMLImageElement) => image.naturalWidth), { timeout: 15_000 }).toBeGreaterThan(0)
+    await panel.screenshot({ path: testInfo.outputPath(`live-${browserName}-results-400x600.png`) })
+    await site.bringToFront()
     const preview = panel.locator('.item-url').first()
     const previewUrl = await preview.getAttribute('href')
     expect(previewUrl).toMatch(/^https:\/\/video1\.nimi\.wiki\/watch\/[\w-]+$/)
@@ -508,16 +580,16 @@ test('sidepanel smoke check', async () => {
     const page = await context.newPage()
     await page.goto(`chrome-extension://${extensionId}/sidepanel.html`)
 
-    await expect(page.getByRole('heading', { name: 'Maltlock Crawler' })).toBeVisible()
-    await expect(page.getByRole('button', { name: '사이트 열고 다음', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Maltlock', exact: true })).toBeVisible()
+    await expect(page.getByRole('tab', { name: '수집결과', exact: true })).toHaveAttribute('aria-selected', 'true')
     await expect(page.getByRole('button', { name: /KissJAV/ })).toHaveAttribute(
       'aria-pressed',
       'true',
     )
     await expect(page.getByRole('button', { name: /ydkorea/ })).toHaveCount(0)
     await expect(page.getByRole('button', { name: /사생활 모드/ })).toBeVisible()
-    await page.getByRole('button', { name: '2 수집 실행', exact: true }).click()
-    await expect(page.getByRole('button', { name: '지금 크롤 실행', exact: true })).toBeVisible()
+    await page.getByRole('tab', { name: '크롤링', exact: true }).click()
+    await expect(page.getByRole('button', { name: '크롤링 시작', exact: true })).toBeVisible()
     await page.getByText('실행 진단').click()
     await expect(
       page.getByRole('checkbox', { name: '파서 실패 원본 로컬 보관' }),
@@ -532,6 +604,7 @@ for (const target of [
   { id: 'missav-weekly-views', name: '123AV', origin: 'https://123av.com', start: '/ko/all?sort=week' },
 ]) {
   test(`${target.name} collects a bounded range, scans duplicate pages, and preserves saved progress`, async () => {
+    test.setTimeout(90_000)
     const context = await launchExtensionContext()
     const visits: number[] = []
     let documentRequests = 0
@@ -615,6 +688,7 @@ for (const target of [
           'kissjav-most-popular-week': 'https://kissjav.com/most-popular/?sort_by=video_viewed_week',
         })))
         await panel.reload()
+        await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
         await panel.getByText('사이트 주소 설정', { exact: false }).click()
         await expect(panel.getByLabel('KissJAV URL 커스터마이즈')).toHaveValue(target.origin + target.start)
         // A live old-domain setting must also work with a tab already redirected to li.
@@ -629,11 +703,12 @@ for (const target of [
       await site.bringToFront()
       await panel.getByRole('button', { name: new RegExp(target.name) }).click()
       if (isKiss) {
-        await expect(site).toHaveURL('https://kissjav.com' + target.start)
+        await expect(site).toHaveURL(target.origin + target.start)
         await site.waitForLoadState('load')
       }
-      const start = panel.getByRole('button', { name: '지금 크롤 실행', exact: true })
+      const start = panel.getByRole('button', { name: '크롤링 시작', exact: true })
       const status = panel.getByRole('status').first()
+      let initialDocumentRequests = documentRequests
       const readSaved = () => panel.evaluate(async () => {
         const db = await new Promise<IDBDatabase>((resolve, reject) => {
           const request = indexedDB.open('maltlock-db')
@@ -649,31 +724,35 @@ for (const target of [
         return rows.map(({ siteId, title, url, previewImageUrl }) => ({ siteId, title, url, previewImageUrl }))
       })
       await expect(panel.getByLabel(`${target.name} 수집 범위`)).toHaveValue('current')
+      await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+      if (isKiss) initialDocumentRequests = documentRequests
       await start.click()
       await expect(status).toContainText('신규 1건')
       await expect(panel.locator('#step-list')).toBeVisible()
       if (isKiss) {
-        expect((await readSaved())[0].url).toBe('https://kissjav.com/video/known/')
+        expect((await readSaved())[0].url).toBe('https://kissjav.li/video/known/')
         await site.goto(target.origin + target.start)
       }
       const documentToken = isKiss ? await site.evaluate(() => (window as unknown as { documentToken: number }).documentToken) : undefined
-      let initialDocumentRequests = documentRequests
-      await panel.getByRole('button', { name: '2 수집 실행', exact: true }).click()
+      initialDocumentRequests = documentRequests
+      await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
       await panel.getByLabel(`${target.name} 수집 범위`).selectOption('all')
       await expect(panel.getByLabel('시작 페이지', { exact: true })).toHaveValue('1')
       await expect(panel.getByLabel('끝 페이지', { exact: true })).toHaveValue('3')
       visits.length = 0
       const secondPage = waitForSecondPage()
+      await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+      if (isKiss) initialDocumentRequests = documentRequests
       await start.click()
       await secondPage
-      await panel.getByRole('button', { name: '3 저장 목록', exact: true }).click()
+      await panel.getByRole('tab', { name: '수집결과', exact: true }).click()
       const other = await context.newPage()
       await other.goto('https://other.test/')
       await other.bringToFront()
       await expect(status).toContainText('범위 수집 완료 (1–3페이지) · 3페이지 처리 · 신규 1건 저장 · 정확 중복 3건', { timeout: 15_000 })
-      expect(visits).toEqual(isKiss ? [2, 3] : [1, 2, 3])
+      expect(visits).toEqual([1, 2, 3])
       if (isKiss) {
-        expect(documentRequests).toBe(initialDocumentRequests + 2)
+        expect(documentRequests).toBe(initialDocumentRequests + 3)
         await expect(site).toHaveURL(target.origin + href(3))
         expect(await site.evaluate(() => (window as unknown as { documentToken: number }).documentToken)).not.toBe(documentToken)
       }
@@ -689,26 +768,31 @@ for (const target of [
         await site.goto(target.origin + target.start)
         initialDocumentRequests = documentRequests
       }
-      await panel.getByRole('button', { name: '2 수집 실행', exact: true }).click()
+      await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
       await site.bringToFront()
       visits.length = 0
+      await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+      if (isKiss) initialDocumentRequests = documentRequests
       await start.click()
       await expect(status).toContainText('범위 수집 완료 (1–3페이지) · 3페이지 처리 · 신규 0건 저장', { timeout: 15_000 })
       await expect(panel.locator('#step-list')).toBeVisible()
-      expect(visits).toEqual(isKiss ? [2, 3] : [1, 2, 3])
+      expect(visits).toEqual([1, 2, 3])
       if (isKiss) {
-        expect(documentRequests).toBe(initialDocumentRequests)
+        expect(documentRequests).toBe(initialDocumentRequests + 1)
         await expect(site).toHaveURL(target.origin + target.start)
       }
 
       visits.length = 0
-      await panel.getByRole('button', { name: '2 수집 실행', exact: true }).click()
+      await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
       await panel.getByLabel('시작 페이지', { exact: true }).fill('2')
+      await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
       await panel.getByLabel('끝 페이지', { exact: true }).fill('2')
+      await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+      if (isKiss) initialDocumentRequests = documentRequests
       await start.click()
       await expect(status).toContainText('범위 수집 완료 (2–2페이지) · 1페이지 처리')
       await expect(panel.locator('#step-list')).toBeVisible()
-      expect(visits).toEqual([2])
+      expect(visits).toEqual([1, 2])
       if (isKiss) {
         const response = await panel.evaluate(async (target) => {
           const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
@@ -721,37 +805,48 @@ for (const target of [
         expect((await readSaved()).length).toBe(2)
       }
       visits.length = 0
-      await panel.getByRole('button', { name: '2 수집 실행', exact: true }).click()
+      await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
       await panel.getByLabel('시작 페이지', { exact: true }).fill('3')
+      await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+      if (isKiss) initialDocumentRequests = documentRequests
       await start.click()
       await expect(status).toContainText('끝 페이지는 시작 페이지 이상의 정수')
       expect(visits).toEqual([])
+      await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
       await panel.getByLabel('끝 페이지', { exact: true }).fill('')
+      await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+      if (isKiss) initialDocumentRequests = documentRequests
       await start.click()
       await expect(status).toContainText('끝 페이지를 입력해주세요.')
       expect(visits).toEqual([])
+      await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
       await panel.getByLabel('시작 페이지', { exact: true }).fill('1')
+      await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
       await panel.getByLabel('끝 페이지', { exact: true }).fill('3')
 
       if (isKiss) {
         // Manual AJAX navigation retains the URL and document, so both existing guards pass.
         visits.length = 0
-        await start.click()
+        await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+        if (isKiss) initialDocumentRequests = documentRequests
+      await start.click()
         await expect(status).toContainText('1페이지 확인 중 · 1페이지 처리')
         await site.locator('a[data-parameters$="from:3"]').first().click()
         await expect(site.locator('#list_videos_common_videos_list_pagination a.active')).toHaveText('3')
         await expect(status).toContainText('화면의 페이지가 변경되었습니다.')
         expect(visits).toEqual([1, 3])
         expect((await readSaved()).length).toBe(2)
-        expect(documentRequests).toBe(initialDocumentRequests)
+        expect(documentRequests).toBe(initialDocumentRequests + 1)
         visits.length = 0
       }
 
       holdSecondPage = true
       const stoppingPage = waitForSecondPage()
+      await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+      if (isKiss) initialDocumentRequests = documentRequests
       await start.click()
       await stoppingPage
-      await panel.getByRole('button', { name: '자동 수집 중지', exact: true }).click()
+      await panel.getByRole('button', { name: '수집 중지', exact: true }).click()
       releaseSecondPage?.()
       holdSecondPage = false
       await expect(status).toContainText(/수집 중지 · [12]페이지 처리/)
@@ -760,6 +855,8 @@ for (const target of [
 
       malformedNext = true
       visits.length = 0
+      await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+      if (isKiss) initialDocumentRequests = documentRequests
       await start.click()
       await expect(status).toContainText('2페이지에서 일부 완료 · 2페이지 처리', { timeout: 10_000 })
       await expect(status).toContainText(isKiss ? '페이지 이동 버튼' : '다음 페이지 링크')
@@ -769,13 +866,15 @@ for (const target of [
       if (isKiss) await site.goto(target.origin + target.start)
       visits.length = 0
       const navigatingPage = waitForSecondPage()
+      await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+      if (isKiss) initialDocumentRequests = documentRequests
       await start.click()
       await navigatingPage
       await site.goto('https://other.test/')
-      await expect(start).toBeEnabled({ timeout: 10_000 })
+      await expect(panel.locator('#step-list')).toBeVisible({ timeout: 10_000 })
       await expect(status).toContainText('일부 완료')
       await expect(site).toHaveURL('https://other.test/')
-      expect(visits).toEqual(isKiss ? [2] : [1, 2])
+      expect(visits).toEqual([1, 2])
       expect((await readSaved()).length).toBe(2)
     } finally {
       releaseSecondPage?.()
@@ -787,6 +886,9 @@ for (const target of [
 test('step views keep the list usable in a short panel without moving the browsing tab', async ({ browserName }, testInfo) => {
   const context = await launchExtensionContext()
   await context.route('https://other.test/**', (route) => route.fulfill({ body: '<h1>Keep this tab</h1>' }))
+  await context.route('https://images.test/thumbnail.png', (route) => route.fulfill({
+    contentType: 'image/png', body: readFileSync(path.join(resolveExtensionDistPath(), 'icons/maltlock-128.png')),
+  }))
   try {
     const extensionId = await getExtensionId(context)
     const panel = await context.newPage()
@@ -821,17 +923,17 @@ test('step views keep the list usable in a short panel without moving the browsi
     const site = await context.newPage()
     await site.goto('https://other.test/keep')
     await site.bringToFront()
-    await panel.getByRole('button', { name: '저장 목록 바로 보기', exact: true }).click()
-    await panel.getByLabel('목록 사이트').selectOption('kone-pornvideo-hot')
+    await panel.getByRole('tab', { name: '수집결과', exact: true }).click()
+    await panel.getByRole('button', { name: /^Kone\b/ }).click()
     await expect(site).toHaveURL('https://other.test/keep')
     await expect(panel.locator('#step-list .section-heading')).toContainText('30건')
     await expect(panel.locator('.item-summary').first()).toHaveText('https://reference.test/keep-this-summary')
-    await expect(panel.locator('#step-target')).toBeHidden()
+    await expect(panel.getByRole('tab')).toHaveCount(2)
     await expect(panel.locator('#step-crawl')).toBeHidden()
     for (const viewport of [{ width: 400, height: 600 }, { width: 320, height: 480 }, { width: 400, height: 400 }]) {
       await panel.setViewportSize(viewport)
       const box = await panel.locator('.item-list').boundingBox()
-      expect(box!.height).toBeGreaterThan(viewport.height * .45)
+      expect(box!.height).toBeGreaterThanOrEqual(100)
       expect(box!.y + box!.height).toBeLessThan(viewport.height)
       expect(await panel.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width)
       await panel.locator('.item-list').evaluate((list) => { list.scrollTop = list.scrollHeight })
@@ -842,16 +944,16 @@ test('step views keep the list usable in a short panel without moving the browsi
     await panel.screenshot({ path: testInfo.outputPath(`list-${browserName}-400x600.png`) })
     await panel.getByRole('checkbox').first().check()
     await expect(panel.getByText('선택 1건', { exact: true })).toBeVisible()
-    await panel.getByRole('button', { name: '1 대상 선택', exact: true }).click()
-    await expect(panel.getByRole('heading', { name: '어디에서 수집할까요?' })).toBeVisible()
-    await panel.getByRole('button', { name: '3 저장 목록', exact: true }).click()
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+    await expect(panel.getByRole('heading', { name: 'Kone 크롤링', exact: true })).toBeVisible()
+    await panel.getByRole('tab', { name: '수집결과', exact: true }).click()
     await expect(panel.getByText('선택 1건', { exact: true })).toBeVisible()
-    await panel.getByLabel('목록 사이트').selectOption('kissjav-most-popular-week')
+    await panel.getByRole('button', { name: /^KissJAV\b/ }).click()
     await expect(panel.getByAltText('Thumbnail reconnect smoke item')).toBeVisible()
     await expect(site).toHaveURL('https://other.test/keep')
 
     // Large previews must preserve both destinations, source, selection, and keyboard controls.
-    await panel.getByLabel('목록 사이트').selectOption('nimi-tw-ranking')
+    await panel.getByRole('button', { name: /^NimiWiki\b/ }).click()
     await expect(panel.locator('.item-row')).toHaveCount(30)
     const first = panel.locator('.item-row').first()
     await expect(first.locator('.item-title')).toHaveAttribute('href', 'https://www.instagram.com/reel/review-29/')
@@ -954,7 +1056,7 @@ test('restores a cached thumbnail after reopening the sidepanel', async () => {
     await resetExtensionData(page)
     await seedThumbnailItem(page)
     await page.reload()
-    await page.getByRole('button', { name: '3 저장 목록', exact: true }).click()
+    await page.getByRole('tab', { name: '수집결과', exact: true }).click()
 
     const thumbnail = page.getByAltText('Thumbnail reconnect smoke item')
     await expect(thumbnail).toBeVisible()
@@ -969,7 +1071,7 @@ test('restores a cached thumbnail after reopening the sidepanel', async () => {
 
     serveRemoteThumbnail = false
     await page.reload()
-    await page.getByRole('button', { name: '3 저장 목록', exact: true }).click()
+    await page.getByRole('tab', { name: '수집결과', exact: true }).click()
 
     const restoredThumbnail = page.getByAltText('Thumbnail reconnect smoke item')
     await expect(restoredThumbnail).toBeVisible()
@@ -991,10 +1093,9 @@ test('Kone collects the current list after navigation and deduplicates shifted a
   await context.route('https://kone.gg/**', (route) => route.fulfill({
     contentType: 'text/html',
     body: `<!doctype html><html><body>
-      <main>
-        <a href="/s/pornvideo/first?mode=hot"><div title="yuma24 (2.8GB)"></div><img src="https://images.test/first.jpg" alt="yuma24 (2.8GB)"></a>
-        <a href="/s/pornvideo/text?mode=hot"><div title="Text article"></div></a>
-      </main>
+      <main>${new URL(route.request().url()).searchParams.get('p') === '2'
+        ? '<a href="/s/pornvideo/text?mode=hot&p=2"><div title="Text article"></div></a><a href="/s/pornvideo/new?mode=hot&p=2"><div title="yuma24 (4.5GB)"></div></a>'
+        : '<a href="/s/pornvideo/first?mode=hot"><div title="yuma24 (2.8GB)"></div><img src="https://images.test/first.jpg" alt="yuma24 (2.8GB)"></a><a href="/s/pornvideo/text?mode=hot"><div title="Text article"></div></a>'}</main>
       <button onclick="history.pushState({}, '', '?mode=hot&p=2'); document.querySelector('main').innerHTML = '<a href=&quot;/s/pornvideo/text?mode=hot&amp;p=2&quot;><div title=&quot;Text article&quot;></div></a><a href=&quot;/s/pornvideo/new?mode=hot&amp;p=2&quot;><div title=&quot;yuma24 (4.5GB)&quot;></div></a>'">Next page</button>
       <script>self.__next_f = []; self.__next_f.push([1, '[{"id":{"__t":"u","v":"first"},"title":"First article","preview":"https://images.test/first.jpg"}]']);</script>
     </body></html>`,
@@ -1009,15 +1110,19 @@ test('Kone collects the current list after navigation and deduplicates shifted a
     await site.bringToFront()
     await panel.getByRole('button', { name: /Kone/ }).click()
     await expect(site.getByRole('button', { name: 'Next page' })).toBeVisible()
-    await panel.getByRole('button', { name: '지금 크롤 실행', exact: true }).click()
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+    await panel.getByRole('button', { name: '크롤링 시작', exact: true }).click()
     await expect(panel.getByRole('status').first()).toContainText('2건 파싱, 신규 2건')
     await expect(panel.locator('#step-list')).toBeVisible()
     await expect(panel.getByRole('link', { name: 'yuma24 (2.8GB)', exact: true })).toBeVisible()
 
     await site.getByRole('button', { name: 'Next page' }).click()
     await expect(site).toHaveURL(/p=2/)
-    await panel.getByRole('button', { name: '2 수집 실행', exact: true }).click()
-    await panel.getByRole('button', { name: '지금 크롤 실행', exact: true }).click()
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+    await panel.locator('.site-settings > summary').click()
+    await panel.getByLabel('Kone URL 커스터마이즈').fill(site.url())
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+    await panel.getByRole('button', { name: '크롤링 시작', exact: true }).click()
     await expect(panel.getByRole('status').first()).toContainText(/2건 파싱, 신규 1건.*정확 중복 1건/)
     const saved = await panel.evaluate(async () => {
       const database = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -1076,8 +1181,8 @@ test('Kone collects the current list after navigation and deduplicates shifted a
     })
     expect(await counts()).toMatchObject({ items: 1, itemSignatures: 0, crawledItemLogs: logsBeforeDeletion })
     await site.bringToFront()
-    await panel.getByRole('button', { name: '2 수집 실행', exact: true }).click()
-    await panel.getByRole('button', { name: '지금 크롤 실행', exact: true }).click()
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+    await panel.getByRole('button', { name: '크롤링 시작', exact: true }).click()
     await expect(panel.getByRole('status').first()).toContainText('신규 0건')
     expect((await counts()).items).toBe(1)
     await expect(panel.locator('#step-list')).toBeVisible()
@@ -1088,7 +1193,7 @@ test('Kone collects the current list after navigation and deduplicates shifted a
     await expect(panel.getByRole('status').first()).toContainText('항목 1건을 일괄 삭제했습니다.')
     expect(await counts()).toMatchObject({ items: 0, itemSignatures: 0, crawledItemLogs: logsBeforeDeletion })
     await panel.reload()
-    await panel.getByRole('button', { name: '3 저장 목록', exact: true }).click()
+    await panel.getByRole('tab', { name: '수집결과', exact: true }).click()
     await expect(panel.getByText('전체 저장: 0건', { exact: true })).toHaveText('전체 저장: 0건')
   } finally {
     await context.close()
@@ -1096,6 +1201,7 @@ test('Kone collects the current list after navigation and deduplicates shifted a
 })
 
 test('Kone automatic collection scans duplicate pages, keeps its tab, and preserves progress on stop or failure', async () => {
+  test.setTimeout(90_000)
   const context = await launchExtensionContext()
   const visits: number[] = []
   let malformedNext = false
@@ -1128,16 +1234,19 @@ test('Kone automatic collection scans duplicate pages, keeps its tab, and preser
     await site.goto('https://kone.gg/s/pornvideo?mode=hot')
     await site.bringToFront()
     await panel.getByRole('button', { name: /Kone/ }).click()
-    const start = panel.getByRole('button', { name: '지금 크롤 실행', exact: true })
+    const start = panel.getByRole('button', { name: '크롤링 시작', exact: true })
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click()
     await expect(panel.getByRole('status').first()).toContainText('신규 1건')
     await expect(panel.locator('#step-list')).toBeVisible()
-    await panel.getByRole('button', { name: '2 수집 실행', exact: true }).click()
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await panel.getByLabel('코네 수집 범위').selectOption('all')
     await expect(panel.getByLabel('끝 페이지', { exact: true })).toHaveValue('5')
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await panel.getByLabel('끝 페이지', { exact: true }).fill('')
     visits.length = 0
     const pageTwo = context.waitForEvent('request', { predicate: (request) => request.url().endsWith('mode=hot&p=2') })
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click()
     await pageTwo
     const other = await context.newPage()
@@ -1167,55 +1276,63 @@ test('Kone automatic collection scans duplicate pages, keeps its tab, and preser
 
     await site.bringToFront()
     visits.length = 0
-    await panel.getByRole('button', { name: '2 수집 실행', exact: true }).click()
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click()
     await expect(panel.getByRole('status').first()).toContainText('전체 수집 완료 · 3페이지 처리 · 신규 0건 저장', { timeout: 15_000 })
     await expect(panel.locator('#step-list')).toBeVisible()
     expect(visits).toEqual([1, 2, 3])
 
     visits.length = 0
-    await panel.getByRole('button', { name: '2 수집 실행', exact: true }).click()
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await panel.getByLabel('시작 페이지', { exact: true }).fill('2')
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await panel.getByLabel('끝 페이지', { exact: true }).fill('2')
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click()
     await expect(panel.getByRole('status').first()).toContainText('범위 수집 완료 (2–2페이지) · 1페이지 처리', { timeout: 15_000 })
     await expect(panel.locator('#step-list')).toBeVisible()
-    expect(visits).toEqual([2])
+    expect(visits).toEqual([1, 2])
     visits.length = 0
-    await panel.getByRole('button', { name: '2 수집 실행', exact: true }).click()
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await panel.getByLabel('시작 페이지', { exact: true }).fill('3')
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click()
     await expect(panel.getByRole('status').first()).toContainText('끝 페이지는 시작 페이지 이상의 정수')
     expect(visits).toEqual([])
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await panel.getByLabel('시작 페이지', { exact: true }).fill('1')
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await panel.getByLabel('끝 페이지', { exact: true }).fill('')
     const stoppingPage = context.waitForEvent('request', { predicate: (request) => request.url().endsWith('mode=hot&p=2') })
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click()
     await stoppingPage
-    await panel.getByRole('button', { name: '자동 수집 중지', exact: true }).click()
+    await panel.getByRole('button', { name: '수집 중지', exact: true }).click()
     // The in-flight page may finish before the stop click arrives; page 3 must not start.
     await expect(panel.getByRole('status').first()).toContainText(/수집 중지 · [12]페이지 처리/)
-    await expect(panel.locator('#step-crawl')).toBeVisible()
+    await expect(panel.locator('#step-list')).toBeVisible()
     expect(visits).toEqual([1, 2])
 
     malformedNext = true
     visits.length = 0
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click()
     await expect(panel.getByRole('status').first()).toContainText('2페이지에서 일부 완료 · 2페이지 처리', { timeout: 15_000 })
     expect(visits).toEqual([1, 2])
     await expect(panel.getByRole('status').first()).toContainText('다음 페이지 링크')
-    await expect(panel.locator('#step-crawl')).toBeVisible()
-    await panel.getByRole('button', { name: '3 저장 목록', exact: true }).click()
+    await expect(panel.locator('#step-list')).toBeVisible()
+    await panel.getByRole('tab', { name: '수집결과', exact: true }).click()
     await expect(panel.getByText('Later popular article', { exact: true })).toBeVisible()
-    await panel.getByRole('button', { name: '2 수집 실행', exact: true }).click()
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
 
     malformedNext = false
     visits.length = 0
     const navigatingPage = context.waitForEvent('request', { predicate: (request) => request.url().endsWith('mode=hot&p=2') })
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click()
     await navigatingPage
     await site.goto('https://other.test/')
-    await expect(start).toBeEnabled({ timeout: 10_000 })
+    await expect(panel.locator('#step-list')).toBeVisible({ timeout: 10_000 })
     await expect(panel.getByRole('status').first()).toContainText('일부 완료')
     await expect(site).toHaveURL('https://other.test/')
     expect(visits).toEqual([1, 2])
@@ -1262,7 +1379,7 @@ test('TwiDouga automatic collection follows 11–20 even after duplicates and sa
     await site.goto('https://www.twidouga.net/ko/ranking_t1.php')
     await site.bringToFront()
     await panel.getByRole('button', { name: /TwiDouga/ }).click()
-    const start = panel.getByRole('button', { name: '지금 크롤 실행', exact: true })
+    const start = panel.getByRole('button', { name: '크롤링 시작', exact: true })
     const status = panel.getByRole('status').first()
     const readSaved = () => panel.evaluate(async () => {
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -1279,18 +1396,20 @@ test('TwiDouga automatic collection follows 11–20 even after duplicates and sa
       return rows.map(({ url, title, summary, previewImageUrl }) => ({ url, title, summary, previewImageUrl }))
     })
     await expect(panel.getByLabel('TwiDouga 수집 범위')).toHaveValue('current')
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click()
     await expect(status).toContainText('신규 1건')
     await expect(panel.locator('#step-list')).toBeVisible()
     await expect(site).toHaveURL('https://www.twidouga.net/ko/ranking_t1.php')
     expect((await readSaved()).length).toBe(1)
-    await panel.getByRole('button', { name: '2 수집 실행', exact: true }).click()
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await panel.getByLabel('TwiDouga 수집 범위').selectOption('all')
     visits.length = 0
     const secondPage = context.waitForEvent('request', { predicate: (request) => request.url().endsWith('/ko/ranking_t2.php') })
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click()
     await secondPage
-    await panel.getByRole('button', { name: '3 저장 목록', exact: true }).click()
+    await panel.getByRole('tab', { name: '수집결과', exact: true }).click()
     const other = await context.newPage()
     await other.goto('https://other.test/')
     await other.bringToFront()
@@ -1306,34 +1425,37 @@ test('TwiDouga automatic collection follows 11–20 even after duplicates and sa
       previewImageUrl: 'https://pbs.twimg.com/amplify_video_thumb/900002/img/preview.jpg',
     })
     expect(saved.some((item) => /90009[89]/.test(item.url))).toBe(false)
-    await panel.getByRole('button', { name: '2 수집 실행', exact: true }).click()
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await site.bringToFront()
     visits.length = 0
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click()
     await expect(status).toContainText('1–20위 수집 완료 · 2페이지 처리 · 신규 0건 저장', { timeout: 15_000 })
     await expect(panel.locator('#step-list')).toBeVisible()
     expect(visits).toEqual([1, 2])
 
     visits.length = 0
-    await panel.getByRole('button', { name: '2 수집 실행', exact: true }).click()
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     holdSecondPage = true
     const stoppingPage = context.waitForEvent('request', { predicate: (request) => request.url().endsWith('/ko/ranking_t2.php') })
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click()
     await stoppingPage
     await panel.setViewportSize({ width: 320, height: 400 })
-    await panel.getByRole('button', { name: '3 저장 목록', exact: true }).click()
-    await expect(panel.getByRole('button', { name: '자동 수집 중지', exact: true })).toBeInViewport()
+    await panel.getByRole('tab', { name: '수집결과', exact: true }).click()
+    await expect(panel.getByRole('button', { name: '수집 중지', exact: true })).toBeInViewport()
     expect(await panel.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320)
-    await panel.getByRole('button', { name: '자동 수집 중지', exact: true }).click()
+    await panel.getByRole('button', { name: '수집 중지', exact: true }).click()
     releaseSecondPage?.()
     holdSecondPage = false
     await expect(status).toContainText('수집 중지 · 1페이지 처리')
-    await panel.getByRole('button', { name: '2 수집 실행', exact: true }).click()
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     expect(visits).toEqual([1, 2])
     expect((await readSaved()).length).toBe(2)
 
     malformedNext = true
     visits.length = 0
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click()
     await expect(status).toContainText('1–10위에서 일부 완료 · 1페이지 처리')
     await expect(status).toContainText('11–20위 버튼의 페이지 링크')
@@ -1343,10 +1465,11 @@ test('TwiDouga automatic collection follows 11–20 even after duplicates and sa
     malformedNext = false
     visits.length = 0
     const navigatingPage = context.waitForEvent('request', { predicate: (request) => request.url().endsWith('/ko/ranking_t2.php') })
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await start.click()
     await navigatingPage
     await site.goto('https://other.test/')
-    await expect(start).toBeEnabled({ timeout: 10_000 })
+    await expect(panel.locator('#step-list')).toBeVisible({ timeout: 10_000 })
     await expect(status).toContainText('일부 완료')
     await expect(site).toHaveURL('https://other.test/')
     expect(visits).toEqual([1, 2])

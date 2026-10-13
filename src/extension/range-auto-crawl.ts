@@ -207,7 +207,7 @@ function nextPageUrl(current: string, next: string, siteId: string): string {
   return nextUrl.href
 }
 
-async function waitForPage(tabId: number, expectedUrl: string, previousDocumentId: string, siteId: string, signal: AbortSignal): Promise<PageState> {
+async function waitForPage(tabId: number, expectedUrl: string, previousDocumentId: string | undefined, siteId: string, signal: AbortSignal): Promise<PageState> {
   const deadline = Date.now() + 15_000
   while (Date.now() < deadline) {
     signal.throwIfAborted()
@@ -277,6 +277,8 @@ async function waitForPage(tabId: number, expectedUrl: string, previousDocumentI
 
 export async function crawlRangePages(options: {
   siteId: string
+  tabId: number
+  documentId: string
   targetUrl: string
   startPage: number
   endPage?: number
@@ -296,7 +298,7 @@ export async function crawlRangePages(options: {
     if (siteId !== 'kone-pornvideo-hot' && options.endPage === undefined) {
       throw new Error('끝 페이지를 입력해주세요.')
     }
-    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+    const tab = await chrome.tabs.get(options.tabId)
     if (tab?.id === undefined || !tab.url) throw new Error('수집할 사이트 탭을 찾을 수 없습니다.')
     const start = listUrl(tab.url, siteId)
     const configured = listUrl(options.targetUrl, siteId)
@@ -309,7 +311,7 @@ export async function crawlRangePages(options: {
     let url = isKiss ? tab.url : pageUrl(start, options.startPage, siteId).href
     let previousUrl = tab.url
     let previousPage: number | undefined
-    let previousDocumentId: string | undefined
+    let previousDocumentId: string | undefined = options.documentId
     // ponytail: panel owns the loop; closing it stops after the in-flight page is saved.
     while (!signal.aborted) {
       if (!isKiss) progress.page = pageNumber(new URL(url), siteId)
@@ -334,6 +336,9 @@ export async function crawlRangePages(options: {
             target: { tabId: tab.id }, func: () => location.href,
           }), 15_000, signal)
           if (!before?.documentId) throw new Error('수집할 페이지 문서를 확인하지 못했습니다.')
+          if (!progress.completedPages && attempt === 0 && before.documentId !== options.documentId) {
+            throw new Error('수집 탭의 문서가 변경되었습니다. 자동 수집을 중단합니다.')
+          }
           const latest = await chrome.tabs.get(tab.id)
           if ((!samePageUrl(before.result, previousUrl, siteId) && !samePageUrl(before.result, url, siteId)) ||
             !samePageUrl(latest.url, before.result!, siteId) ||
@@ -341,8 +346,11 @@ export async function crawlRangePages(options: {
             throw new Error('수집 탭이 다른 페이지로 이동했습니다. 자동 수집을 중단합니다.')
           }
           signal.throwIfAborted()
-          if (samePageUrl(before.result, url, siteId)) await chrome.tabs.reload(tab.id)
-          else await chrome.tabs.update(tab.id, { url })
+          const prepared = !progress.completedPages && attempt === 0 && samePageUrl(before.result, url, siteId)
+          if (!prepared) {
+            if (samePageUrl(before.result, url, siteId)) await chrome.tabs.reload(tab.id)
+            else await chrome.tabs.update(tab.id, { url })
+          }
           // update() can return before the new document commits.
           const deadline = Date.now() + 5_000
           while (samePageUrl((await chrome.tabs.get(tab.id)).url, previousUrl, siteId) && !samePageUrl(previousUrl, url, siteId)) {
@@ -351,7 +359,7 @@ export async function crawlRangePages(options: {
           }
           previousUrl = url
           try {
-            state = await waitForPage(tab.id, url, before.documentId, siteId, signal)
+            state = await waitForPage(tab.id, url, prepared ? undefined : before.documentId, siteId, signal)
           } catch (error) {
             // Retry only while still on this page; never overwrite a user's navigation.
             if (signal.aborted || attempt === 1 || !samePageUrl((await chrome.tabs.get(tab.id)).url, url, siteId)) throw error

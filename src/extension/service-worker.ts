@@ -1,4 +1,4 @@
-import { getTargetSiteById, siteMatchesUrl } from '../config/targets'
+import { getTargetSiteById, normalizeKissjavUrl, siteMatchesUrl } from '../config/targets'
 import {
   saveCrawlDiagnostic,
   saveCrawlRun,
@@ -7,6 +7,7 @@ import {
 import { buildNimiApiUrl } from './nimi'
 import { isEmptyNimiApiPayload } from '../parsers/nimi-tw-ranking.parser'
 import { collectHtml } from './collect-html'
+import { delay, waitForSnapshot } from './auto-crawl'
 import { parseByParserId } from '../parsers'
 import type {
   CollectHtmlRequest,
@@ -20,6 +21,7 @@ import type {
   OpenItemLinkMessage,
   OpenItemLinkResult,
   OpenTargetSiteMessage,
+  OpenTargetSiteResult,
   SetPrivacyScreenBlurMessage,
   SetPrivacyScreenBlurResult,
   RuntimeRequestMessage,
@@ -42,6 +44,7 @@ import {
 const PRIVACY_BLUR_STYLE_ID = 'maltlock-privacy-screen-blur-style'
 let privacyScreenBlurEnabled = false
 const privacyBlurredTabIds = new Set<number>()
+const targetPreparations = new Map<string, AbortController>()
 
 class CrawlFailure extends Error {
   code: CrawlErrorCode
@@ -188,7 +191,15 @@ async function ensureSidePanelBehavior(): Promise<void> {
 
 async function openTargetSite(
   message: OpenTargetSiteMessage,
-): Promise<RuntimeResponse<{ siteId: string; tabId: number; url: string }>> {
+): Promise<RuntimeResponse<OpenTargetSiteResult>> {
+  const requestId = message.payload?.requestId
+  const controller = new AbortController()
+  if (requestId !== undefined) {
+    if (typeof requestId !== 'string' || !requestId || requestId.length > 64 || targetPreparations.has(requestId)) {
+      return errorResponse(new CrawlFailure('INVALID_REQUEST', '사이트 준비 요청 ID가 올바르지 않습니다.'))
+    }
+    targetPreparations.set(requestId, controller)
+  }
   try {
     const site = getTargetSiteById(message.payload.siteId)
 
@@ -205,30 +216,66 @@ async function openTargetSite(
       )
     }
 
-    const nextUrl = targetUrl ?? site.url
+    const requestedUrl = targetUrl ?? site.url
+    const nextUrl = site.id === 'kissjav-most-popular-week' && siteMatchesUrl(site, requestedUrl)
+      ? normalizeKissjavUrl(requestedUrl).href : requestedUrl
     const activeTab = await getActiveTab()
-    const tab = await chrome.tabs.update(activeTab.id, {
+    const deadline = Date.now() + 15_000
+    const signal = controller.signal
+    const snapshot = () => waitForSnapshot(chrome.scripting.executeScript({
+      target: { tabId: activeTab.id },
+      func: () => ({ url: location.href, ready: document.readyState === 'complete' }),
+    }), deadline - Date.now(), signal)
+    // A same-URL navigation must replace the old document before capture.
+    const before = activeTab.url === nextUrl ? (await snapshot())[0] : undefined
+    if (activeTab.url === nextUrl && !before?.documentId) {
+      throw new CrawlFailure('CONTENT_SCRIPT_UNAVAILABLE', '사이트 이동 전에 현재 페이지의 문서를 확인하지 못했습니다.')
+    }
+    const current = await chrome.tabs.get(activeTab.id)
+    if (current.url !== activeTab.url || (current.pendingUrl && current.pendingUrl !== activeTab.url)) {
+      throw new CrawlFailure('TAB_URL_MISMATCH', '사이트 이동 전에 현재 탭이 변경되었습니다.')
+    }
+    if (before && (!before.documentId || before.result?.url !== activeTab.url)) {
+      throw new CrawlFailure('TAB_URL_MISMATCH', '사이트 이동 전에 페이지 문서가 변경되었습니다.')
+    }
+    signal.throwIfAborted()
+    await chrome.tabs.update(activeTab.id, {
       url: nextUrl,
       active: true,
     })
-    const updatedTabId = tab?.id ?? activeTab.id
-
-    if (!updatedTabId) {
-      return errorResponse(
-        new CrawlFailure('TAB_NOT_FOUND', '현재 탭을 이동할 수 없습니다.'),
-      )
+    let committed = false
+    while (Date.now() < deadline) {
+      signal.throwIfAborted()
+      const loading = await chrome.tabs.get(activeTab.id)
+      if ((loading.url !== nextUrl && (committed || loading.url !== activeTab.url)) ||
+        (loading.pendingUrl && loading.pendingUrl !== nextUrl)) {
+        throw new CrawlFailure('TAB_URL_MISMATCH', '수집 탭이 다른 페이지로 이동했습니다. 크롤링을 중단합니다.')
+      }
+      if (loading.url === nextUrl) committed = true
+      if (loading.url === nextUrl && loading.status === 'complete' && !loading.pendingUrl) {
+        const [document] = await snapshot()
+        if (document?.result?.url !== nextUrl) {
+          throw new CrawlFailure('TAB_URL_MISMATCH', '수집 중 대상 페이지가 변경되었습니다.')
+        }
+        const latest = await chrome.tabs.get(activeTab.id)
+        if (latest.url !== nextUrl || (latest.pendingUrl && latest.pendingUrl !== nextUrl)) {
+          throw new CrawlFailure('TAB_URL_MISMATCH', '수집 중 대상 페이지가 변경되었습니다.')
+        }
+        if (document.documentId && document.documentId !== before?.documentId && document.result.ready) {
+          signal.throwIfAborted()
+          return { ok: true, data: { siteId: site.id, tabId: activeTab.id, url: nextUrl, documentId: document.documentId } }
+        }
+      }
+      await delay(Math.min(150, Math.max(1, deadline - Date.now())), signal)
     }
-
-    return {
-      ok: true,
-      data: {
-        siteId: site.id,
-        tabId: updatedTabId,
-        url: nextUrl,
-      },
-    }
+    throw new CrawlFailure('CONTENT_SCRIPT_UNAVAILABLE', '15초 안에 사이트의 새 문서를 확인하지 못했습니다. 사이트 화면의 로그인·접속 오류를 확인해주세요.')
   } catch (error) {
+    if (error instanceof Error && error.message.includes('페이지 문서 응답 시간이 초과')) {
+      return errorResponse(new CrawlFailure('CONTENT_SCRIPT_UNAVAILABLE', error.message))
+    }
     return errorResponse(toCrawlFailure(error))
+  } finally {
+    if (requestId) targetPreparations.delete(requestId)
   }
 }
 
@@ -651,6 +698,7 @@ function isRuntimeRequestMessage(message: unknown): message is RuntimeRequestMes
   const maybeMessage = message as { type?: string }
   return (
     maybeMessage.type === 'OPEN_TARGET_SITE' ||
+    maybeMessage.type === 'CANCEL_TARGET_SITE' ||
     maybeMessage.type === 'OPEN_ITEM_LINK' ||
     maybeMessage.type === 'CRAWL_ACTIVE_TAB' ||
     maybeMessage.type === 'SET_PRIVACY_SCREEN_BLUR'
@@ -710,6 +758,18 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
   if (message.type === 'OPEN_TARGET_SITE') {
     void openTargetSite(message).then(sendResponse)
     return true
+  }
+
+  if (message.type === 'CANCEL_TARGET_SITE') {
+    const requestId = message.payload?.requestId
+    if (typeof requestId !== 'string' || !requestId || requestId.length > 64) {
+      sendResponse(errorResponse(new CrawlFailure('INVALID_REQUEST', '사이트 준비 요청 ID가 올바르지 않습니다.')))
+      return false
+    }
+    const preparation = targetPreparations.get(requestId)
+    preparation?.abort()
+    sendResponse({ ok: true, data: { cancelled: !!preparation } })
+    return false
   }
 
   if (message.type === 'OPEN_ITEM_LINK') {
