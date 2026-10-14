@@ -565,10 +565,10 @@ function App() {
         next.delete(itemId)
         return next
       })
-      await removePersistentThumbnail(itemId)
+      const cacheFailed = await removePersistentThumbnail(itemId).then(() => false, () => true)
       setStatus({
-        kind: 'success',
-        message: '아이템 1건을 삭제했습니다.',
+        kind: cacheFailed ? 'warning' : 'success',
+        message: `아이템 1건을 삭제했습니다.${cacheFailed ? ' 썸네일 캐시 정리에 실패했습니다.' : ''}`,
       })
     } catch {
       if (deleteFocusRef.current?.removedId === itemId) deleteFocusRef.current.nextId = itemId

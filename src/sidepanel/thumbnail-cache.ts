@@ -98,9 +98,3 @@ export async function removePersistentThumbnail(itemId: string): Promise<void> {
   const cache = await caches.open(THUMBNAIL_CACHE_NAME)
   await cache.delete(createCacheKey(itemId))
 }
-
-export async function clearPersistentThumbnails(): Promise<void> {
-  if (!isCacheStorageAvailable()) return
-  await Promise.all(pendingWrites.values())
-  await caches.delete(THUMBNAIL_CACHE_NAME)
-}

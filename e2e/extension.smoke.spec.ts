@@ -1204,6 +1204,43 @@ test('restores a cached thumbnail after reopening the sidepanel', async () => {
   }
 })
 
+test('single deletion reports thumbnail cleanup failures as warnings', async () => {
+  const context = await launchExtensionContext()
+  await context.route('https://images.test/thumbnail.png', (route) => route.fulfill({
+    contentType: 'image/png', body: readFileSync(path.join(resolveExtensionDistPath(), 'icons/maltlock-128.png')),
+  }))
+  try {
+    const id = await getExtensionId(context)
+    const panel = await context.newPage()
+    await panel.goto(`chrome-extension://${id}/sidepanel.html`)
+    await resetExtensionData(panel)
+    await seedThumbnailItem(panel)
+    await panel.evaluate(async () => {
+      const database = await new Promise<IDBDatabase>((resolve) => {
+        const request = indexedDB.open('maltlock-db')
+        request.onsuccess = () => resolve(request.result)
+      })
+      const transaction = database.transaction('items', 'readwrite')
+      transaction.objectStore('items').put({ id: 'cleanup-next', siteId: 'kissjav-most-popular-week', title: 'Next saved item', url: 'https://kissjav.li/video/next', crawledAt: Date.now() - 1_000 })
+      await new Promise<void>((resolve) => { transaction.oncomplete = () => resolve() })
+      database.close()
+    })
+    await panel.reload()
+    await panel.getByRole('tab', { name: '수집결과', exact: true }).click()
+    await expect(panel.locator('.item-row')).toHaveCount(2)
+    await expect.poll(() => panel.getByAltText('Thumbnail reconnect smoke item').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(128)
+    await panel.evaluate(() => { caches.open = async () => { throw new DOMException('Storage unavailable', 'UnknownError') } })
+    await panel.locator('.item-delete').first().focus()
+    await panel.keyboard.press('Space')
+    await expect(panel.locator('.item-row')).toHaveCount(1)
+    expect((await readSavedItems(panel)).map((item) => item.id)).toEqual(['cleanup-next'])
+    await expect(panel.getByRole('status')).toContainText('아이템 1건을 삭제했습니다.')
+    await expect(panel.getByRole('status')).toContainText('썸네일 캐시 정리에 실패했습니다.')
+    await expect(panel.getByRole('status')).toHaveClass(/status-warning/)
+    await expect(panel.locator('.item-delete')).toBeFocused()
+  } finally { await context.close() }
+})
+
 test('thumbnail requests follow list visibility instead of prefetching the entire library', async () => {
   const context = await launchExtensionContext()
   const requested = new Set<string>()
