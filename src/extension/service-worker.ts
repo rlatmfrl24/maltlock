@@ -4,7 +4,7 @@ import {
   saveCrawlRun,
   upsertCrawledItems,
 } from '../db/repository'
-import { buildNimiApiUrl } from './nimi'
+import { buildNimiApiUrl, normalizeNimiUrl } from './nimi'
 import { isEmptyNimiApiPayload } from '../parsers/nimi-tw-ranking.parser'
 import { collectHtml } from './collect-html'
 import { delay, waitForSnapshot } from './auto-crawl'
@@ -217,8 +217,12 @@ async function openTargetSite(
     }
 
     const requestedUrl = targetUrl ?? site.url
-    const nextUrl = site.id === 'kissjav-most-popular-week' && siteMatchesUrl(site, requestedUrl)
-      ? normalizeKissjavUrl(requestedUrl).href : requestedUrl
+    let nextUrl = requestedUrl
+    if (site.id === 'kissjav-most-popular-week' && siteMatchesUrl(site, requestedUrl)) {
+      nextUrl = normalizeKissjavUrl(requestedUrl).href
+    } else if (site.id === 'nimi-tw-ranking') {
+      nextUrl = normalizeNimiUrl(requestedUrl).href
+    }
     const activeTab = await getActiveTab()
     const deadline = Date.now() + 15_000
     const signal = controller.signal

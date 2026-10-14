@@ -81,6 +81,21 @@ const API_PERIOD_BY_PERIOD: Record<NimiPeriod, NimiApiPeriod> = {
   yearly: 'year',
 }
 
+export function normalizeNimiUrl(input: string): URL {
+  const url = new URL(input)
+  const platform = getNimiPlatform(input)
+  if (!platform || !CURRENT_NIMI_HOSTS.has(url.hostname)) return url
+  url.hostname = 'video1.nimi.wiki'
+  const routePeriod = url.pathname.match(/^\/(?:tw|ig|tt|bs)\/ranking\/([^/]+)\/?$/)?.[1]
+  const period = routePeriod && Object.hasOwn(PERIOD_BY_QUERY_VALUE, routePeriod) ? PERIOD_BY_QUERY_VALUE[routePeriod] : undefined
+  if (period) {
+    url.pathname = `/${platform}/ranking`
+    if (!url.searchParams.has('sort')) url.searchParams.set('sort', 'plays')
+    url.searchParams.set('period', API_PERIOD_BY_PERIOD[period])
+  }
+  return url
+}
+
 function stripHtmlTags(input: string): string {
   return input.replace(/<[^>]+>/g, ' ')
 }

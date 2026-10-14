@@ -128,6 +128,20 @@ it('prepares a legacy KissJAV address on its supported canonical host', async ()
   expect(await request.task).toMatchObject({ ok: true, data: { url: tab.url, documentId: 'canonical-document' } })
 })
 
+it.each(['tw', 'ig', 'tt', 'bs'])('prepares the supported NimiWiki %s week route before its redirect', async (platform) => {
+  tab.url = 'https://other.test/'
+  const canonicalUrl = `https://video1.nimi.wiki/${platform}/ranking?sort=plays&period=week`
+  const request = openSite('nimi-tw-ranking', `https://video1.nimi.wiki/${platform}/ranking/week`)
+  await vi.advanceTimersByTimeAsync(10)
+  expect(tab.pendingUrl).toBe(canonicalUrl)
+  tab.url = canonicalUrl
+  tab.status = 'complete'
+  delete tab.pendingUrl
+  documentId = 'canonical-document'
+  await vi.advanceTimersByTimeAsync(500)
+  expect(await request.task).toMatchObject({ ok: true, data: { url: canonicalUrl, documentId: 'canonical-document' } })
+})
+
 it('rejects a missing original document rather than accepting an old same-URL page', async () => {
   emptyFirstSnapshot = true
   const request = openSite()

@@ -569,15 +569,18 @@ test('NimiWiki cycles weekly platforms, persists sources, filters before the lim
   } finally { await context.close() }
 })
 
-test('NimiWiki live weekly collection reaches all platforms and persists their API items', async ({ browserName }, testInfo) => {
+for (const savedUrl of [undefined, 'https://video1.nimi.wiki/tw/ranking/week']) {
+test(`NimiWiki live weekly collection reaches all platforms and persists their API items (${savedUrl ? 'saved week route' : 'default URL'})`, async ({ browserName }, testInfo) => {
   test.skip(process.env.MALTLOCK_LIVE_NIMI !== '1', 'Explicit live-source verification')
   test.setTimeout(120_000)
   const context = await launchExtensionContext()
   try {
     const id = await getExtensionId(context)
     const payloads = new Map<string, string>()
+    const responseStatuses = new Map<string, number>()
     const reads: Promise<void>[] = []
     context.on('response', (response) => {
+      responseStatuses.set(response.url(), response.status())
       if (response.url().startsWith('https://api.nimi.wiki/video/') && response.request().serviceWorker()?.url().startsWith(`chrome-extension://${id}/`)) {
         reads.push(response.text().then((body) => { payloads.set(new URL(response.url()).pathname.split('/')[2], body) }))
       }
@@ -585,13 +588,18 @@ test('NimiWiki live weekly collection reaches all platforms and persists their A
     const panel = await context.newPage()
     await panel.goto(`chrome-extension://${id}/sidepanel.html`)
     await resetExtensionData(panel)
+    if (savedUrl) {
+      await panel.evaluate((url) => localStorage.setItem('maltlock:site-urls', JSON.stringify({ 'nimi-tw-ranking': url })), savedUrl)
+      await panel.reload()
+    }
     const site = await context.newPage()
     await site.goto('about:blank')
     await site.bringToFront()
     await panel.getByRole('button', { name: 'NimiWiki', exact: false }).click()
     await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
     await panel.getByRole('button', { name: '크롤링 시작', exact: true }).click()
-    await expect(panel.getByRole('status').first()).toContainText('4개 플랫폼 주간 수집 완료 · 4/4개 플랫폼 처리', { timeout: 100_000 })
+    await expect(panel.locator('#step-list')).toBeVisible({ timeout: 100_000 })
+    await expect(panel.getByRole('status').first()).toContainText('4개 플랫폼 주간 수집 완료 · 4/4개 플랫폼 처리')
     await Promise.all(reads)
     const saved = await readSavedItems(panel)
     for (const platform of ['tw', 'ig', 'tt', 'bs']) {
@@ -629,7 +637,15 @@ test('NimiWiki live weekly collection reaches all platforms and persists their A
     await expect(site).toHaveURL('https://video1.nimi.wiki/bs/ranking?sort=plays&period=week')
     await panel.setViewportSize({ width: 400, height: 600 })
     await panel.bringToFront()
-    await expect.poll(() => panel.locator('img.item-preview').first().evaluate((image: HTMLImageElement) => image.naturalWidth), { timeout: 15_000 }).toBeGreaterThan(0)
+    const thumbnail = panel.locator('img.item-preview').first()
+    await thumbnail.scrollIntoViewIfNeeded()
+    try {
+      await expect.poll(() => thumbnail.evaluate((image: HTMLImageElement) => image.naturalWidth), { timeout: 15_000 }).toBeGreaterThan(0)
+    } catch (error) {
+      const state = await thumbnail.evaluate((image: HTMLImageElement) => ({ src: image.currentSrc, complete: image.complete, width: image.naturalWidth }))
+      console.log('LIVE_NIMI thumbnail failure', { host: new URL(state.src).hostname, complete: state.complete, width: state.width, status: responseStatuses.get(state.src) })
+      throw error
+    }
     await panel.screenshot({ path: testInfo.outputPath(`live-${browserName}-results-400x600.png`) })
     await site.bringToFront()
     const preview = panel.locator('.item-url').first()
@@ -663,6 +679,7 @@ test('NimiWiki live weekly collection reaches all platforms and persists their A
     console.log('LIVE_NIMI deletion: item removed, keyboard focus continued, seen log retained')
   } finally { await context.close() }
 })
+}
 
 test('sidepanel smoke check', async () => {
   const context = await launchExtensionContext()

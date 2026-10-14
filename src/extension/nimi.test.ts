@@ -1,8 +1,25 @@
 import { describe, expect, it } from 'vitest'
-import { buildNimiApiUrl, getNimiActivePeriod, getNimiActiveView, getItemSourcePlatform, getNimiPlatform, getNimiVideoPageUrl } from './nimi'
+import { buildNimiApiUrl, getNimiActivePeriod, getNimiActiveView, getItemSourcePlatform, getNimiPlatform, getNimiVideoPageUrl, normalizeNimiUrl } from './nimi'
 import type { CrawledItem } from '../types/contracts'
 
 describe('nimi helper', () => {
+  it.each(['hour', 'day', 'week', 'month', 'year'])('normalizes supported ranking/%s routes without losing filters', (period) => {
+    expect(normalizeNimiUrl(`https://video1.nimi.wiki/ig/ranking/${period}?sort=likes&tag=kept#preview`).href)
+      .toBe(`https://video1.nimi.wiki/ig/ranking?sort=likes&tag=kept&period=${period}#preview`)
+  })
+
+  it('normalizes the supported video host without rewriting unrelated hosts or routes', () => {
+    expect(normalizeNimiUrl('https://video.nimi.wiki/tw/ranking/week').href)
+      .toBe('https://video1.nimi.wiki/tw/ranking?sort=plays&period=week')
+    for (const url of [
+      'https://video1.nimi.wiki/tw/new',
+      'https://video1.nimi.wiki/tt/ranking?sort=plays&period=day',
+      'https://video1.nimi.wiki/tw/ranking/constructor',
+      'https://video1.nimi.wiki.evil.test/tw/ranking/week',
+      'https://other.test/tw/ranking/week',
+    ]) expect(normalizeNimiUrl(url).href).toBe(url)
+  })
+
   it('opens Bluesky previews with the stored Nimi item ID without changing media URLs', () => {
     const id = '01a08f4c-0e9d-7365-8eab-db4bf2112d18'
     const item: CrawledItem = {
