@@ -642,8 +642,8 @@ test(`NimiWiki live weekly collection reaches all platforms and persists their A
     try {
       await expect.poll(() => thumbnail.evaluate((image: HTMLImageElement) => image.naturalWidth), { timeout: 15_000 }).toBeGreaterThan(0)
     } catch (error) {
-      const state = await thumbnail.evaluate((image: HTMLImageElement) => ({ src: image.currentSrc, complete: image.complete, width: image.naturalWidth }))
-      console.log('LIVE_NIMI thumbnail failure', { host: new URL(state.src).hostname, complete: state.complete, width: state.width, status: responseStatuses.get(state.src) })
+      const state = await thumbnail.evaluate((image: HTMLImageElement) => ({ src: image.currentSrc, requestedSrc: image.src, complete: image.complete, width: image.naturalWidth, top: image.getBoundingClientRect().top }))
+      console.log('LIVE_NIMI thumbnail failure', { ...state, status: responseStatuses.get(state.src || state.requestedSrc) })
       throw error
     }
     await panel.screenshot({ path: testInfo.outputPath(`live-${browserName}-results-400x600.png`) })
