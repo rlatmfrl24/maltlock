@@ -38,7 +38,7 @@ export function CachedThumbnail({
   }, [itemId, sourceUrl])
 
   if (failed) {
-    return <div className="item-preview item-preview-empty">No Image</div>
+    return <div className="item-preview item-preview-empty">미리보기 없음</div>
   }
 
   return (

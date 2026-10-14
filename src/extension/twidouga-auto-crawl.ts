@@ -21,6 +21,8 @@ function sameUrl(first: string | undefined, second: string): boolean {
 }
 
 export async function crawlTwidougaPages(options: {
+  tabId: number
+  documentId: string
   targetUrl: string
   captureFailurePayload: boolean
   signal: AbortSignal
@@ -31,7 +33,7 @@ export async function crawlTwidougaPages(options: {
     page: 1, completedPages: 0, insertedCount: 0, duplicateCount: 0, rejectedCount: 0,
   }
   try {
-    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+    const tab = await chrome.tabs.get(options.tabId)
     if (tab?.id === undefined || !tab.url) throw new Error('수집할 TwiDouga 탭을 찾을 수 없습니다.')
     rankingUrl(tab.url)
     const start = rankingUrl(options.targetUrl)
@@ -50,14 +52,18 @@ export async function crawlTwidougaPages(options: {
       }
       const [before] = await waitForSnapshot(chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => location.href }), 15_000, signal)
       if (!before?.documentId) throw new Error('수집할 페이지 문서를 확인하지 못했습니다.')
+      if (page === 1 && before.documentId !== options.documentId) throw new Error('수집 탭의 문서가 변경되었습니다. 자동 수집을 중단합니다.')
       const latest = await chrome.tabs.get(tab.id)
       if (!sameUrl(before.result, previousUrl) || !sameUrl(latest.url, before.result!) ||
         (latest.pendingUrl && !sameUrl(latest.pendingUrl, previousUrl))) {
         throw new Error('수집 탭이 다른 페이지로 이동했습니다. 자동 수집을 중단합니다.')
       }
       signal.throwIfAborted()
-      if (sameUrl(before.result, url)) await chrome.tabs.reload(tab.id)
-      else await chrome.tabs.update(tab.id, { url })
+      const prepared = page === 1 && sameUrl(before.result, url)
+      if (!prepared) {
+        if (sameUrl(before.result, url)) await chrome.tabs.reload(tab.id)
+        else await chrome.tabs.update(tab.id, { url })
+      }
 
       const deadline = Date.now() + 15_000
       let state: { documentId: string; url: string; nextUrl?: string } | undefined
@@ -89,7 +95,7 @@ export async function crawlTwidougaPages(options: {
               }
             },
           }), deadline - Date.now(), signal)
-          if (result?.documentId && result.documentId !== before.documentId &&
+          if (result?.documentId && (prepared || result.documentId !== before.documentId) &&
             result.result?.ready && sameUrl(result.result.url, url)) {
             state = { ...result.result, documentId: result.documentId }
             break

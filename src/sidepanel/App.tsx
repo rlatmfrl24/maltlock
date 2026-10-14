@@ -24,8 +24,8 @@ import { sendRuntimeRequest } from '../extension/runtime-client'
 import { crawlRangePages } from '../extension/range-auto-crawl'
 import { crawlTwidougaPages } from '../extension/twidouga-auto-crawl'
 import { crawlNimiPlatforms } from '../extension/nimi-auto-crawl'
-import { getItemSourcePlatform, NIMI_PLATFORMS, NIMI_PLATFORM_LABELS } from '../extension/nimi'
-import type { AutoCrawlProgress } from '../extension/auto-crawl'
+import { getItemSourcePlatform, getNimiVideoPageUrl, NIMI_PLATFORMS, NIMI_PLATFORM_LABELS } from '../extension/nimi'
+import { waitForSnapshot, type AutoCrawlProgress } from '../extension/auto-crawl'
 import { hasConsecutiveParserFailures } from '../extension/crawl-diagnostics'
 import { decompressDiagnosticPayload } from '../extension/diagnostic-artifacts'
 import { createCrawlDiagnosticExport } from './diagnostic-export'
@@ -56,7 +56,7 @@ interface StatusState {
 
 const DEFAULT_STATUS: StatusState = {
   kind: 'idle',
-  message: '대상 사이트로 현재 탭을 이동한 뒤 크롤 버튼을 눌러주세요.',
+  message: '사이트를 선택해 저장된 결과를 보거나 크롤링을 시작하세요.',
 }
 
 const PRIVACY_MODE_STORAGE_KEY = 'maltlock:privacy-mode'
@@ -72,6 +72,7 @@ const TARGET_SITE_BY_ID = new Map(targetSites.map((site) => [site.id, site]))
 const EMPTY_COUNTS_BY_SITE: Record<string, number> = Object.fromEntries(
   targetSites.map((site) => [site.id, 0]),
 )
+const EMPTY_ITEMS: CrawledItem[] = []
 const STATUS_LABEL_BY_KIND: Record<StatusKind, string> = {
   idle: '안내',
   loading: '진행 중',
@@ -171,7 +172,7 @@ function getTitleLinkUrl(item: CrawledItem): string {
     return item.summary
   }
 
-  return item.url
+  return getNimiVideoPageUrl(item) ?? item.url
 }
 
 function getRunStatusLabel(run: CrawlRun): string {
@@ -219,20 +220,22 @@ function App() {
   const [activeSiteId, setActiveSiteId] = useState(defaultSiteId)
   const [siteUrls, setSiteUrls] = useState<Record<string, string>>(getInitialSiteUrls)
   const [status, setStatus] = useState<StatusState>(DEFAULT_STATUS)
-  const [step, setStep] = useState<'target' | 'crawl' | 'list'>('target')
+  const [view, setView] = useState<'results' | 'crawl'>('results')
   const [isCrawling, setIsCrawling] = useState(false)
-  const [twidougaCrawlMode, setTwidougaCrawlMode] = useState('current')
+  const [twidougaCrawlMode, setTwidougaCrawlMode] = useState('all')
   const [nimiCrawlMode, setNimiCrawlMode] = useState('all')
   const [nimiSourceFilter, setNimiSourceFilter] = useState<NimiPlatform | ''>('')
   const activeSourceFilter = activeSiteId === 'nimi-tw-ranking' ? nimiSourceFilter || undefined : undefined
   const [rangeCrawlSettings, setRangeCrawlSettings] = useState<Record<string, { mode: string; startPage: string; endPage: string }>>({
-    'kone-pornvideo-hot': { mode: 'current', startPage: '1', endPage: '5' },
-    'kissjav-most-popular-week': { mode: 'current', startPage: '1', endPage: '3' },
-    'missav-weekly-views': { mode: 'current', startPage: '1', endPage: '3' },
+    'kone-pornvideo-hot': { mode: 'all', startPage: '1', endPage: '5' },
+    'kissjav-most-popular-week': { mode: 'all', startPage: '1', endPage: '3' },
+    'missav-weekly-views': { mode: 'all', startPage: '1', endPage: '3' },
   })
   const activeRangeSettings = rangeCrawlSettings[activeSiteId]
   const [isStoppingCrawl, setIsStoppingCrawl] = useState(false)
   const autoCrawlRef = useRef<AbortController | null>(null)
+  const preparationRequestRef = useRef<string | null>(null)
+  const resultFocusRef = useRef(false)
   const [isPrivacyMode, setIsPrivacyMode] = useState(getInitialPrivacyMode)
   const [isTogglingPrivacyMode, setIsTogglingPrivacyMode] = useState(false)
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null)
@@ -249,7 +252,10 @@ function App() {
   const activeSite = useMemo(() => TARGET_SITE_BY_ID.get(activeSiteId), [activeSiteId])
   const activeSiteName = activeSite?.name ?? '-'
 
-  useEffect(() => () => autoCrawlRef.current?.abort(), [])
+  useEffect(() => () => {
+    autoCrawlRef.current?.abort()
+    if (preparationRequestRef.current) void sendRuntimeRequest({ type: 'CANCEL_TARGET_SITE', payload: { requestId: preparationRequestRef.current } })
+  }, [])
 
   const activeSiteUrl = useMemo(() => {
     if (!activeSite) {
@@ -295,30 +301,30 @@ function App() {
       })
   }, [])
 
-  const items = useLiveQuery(
+  const library = useLiveQuery(
     async () => {
-      if (!activeSiteId) {
-        return []
+      try {
+        return { items: activeSiteId ? await listItemsBySite(activeSiteId, 200, activeSourceFilter) : EMPTY_ITEMS, error: undefined }
+      } catch {
+        return { items: EMPTY_ITEMS, error: '저장 결과를 불러오지 못했습니다.' }
       }
-
-      return listItemsBySite(activeSiteId, 200, activeSourceFilter)
     },
     [activeSiteId, activeSourceFilter],
-    [],
   )
+  const items = library?.items ?? EMPTY_ITEMS
 
   useEffect(() => {
     const pending = deleteFocusRef.current
     if (!pending || deletingItemId) return
     if (pending.nextId !== pending.removedId && items.some((item) => item.id === pending.removedId)) return
-    if (step === 'list' && document.activeElement === document.body) {
+    if (view === 'results' && document.activeElement === document.body) {
       const nextButton = pending.nextId
         ? document.querySelector<HTMLButtonElement>(`.item-delete[data-item-id="${CSS.escape(pending.nextId)}"]`)
         : null
       ;(nextButton ?? document.getElementById('list-heading'))?.focus()
     }
     deleteFocusRef.current = null
-  }, [items, deletingItemId, step])
+  }, [items, deletingItemId, view])
 
   const recentRuns = useLiveQuery(
     async () => {
@@ -375,123 +381,107 @@ function App() {
     }
   }, [])
 
-  async function handleOpenSite(siteId: string): Promise<void> {
-    const site = TARGET_SITE_BY_ID.get(siteId)
-    const siteName = site?.name ?? siteId
-    const targetUrl = (siteUrls[siteId] ?? site?.url ?? '').trim()
+  function handleSelectSite(siteId: string): void {
+    if (siteId === activeSiteId) return
     setActiveSiteId(siteId)
-
-    const response = await sendRuntimeRequest<OpenTargetSiteResult>({
-      type: 'OPEN_TARGET_SITE',
-      payload: { siteId, targetUrl },
-    })
-
-    if (!response.ok) {
-      setStatus({
-        kind: 'error',
-        message: `${mapError(response.error.code)}${response.error.detail ? ` (${response.error.detail})` : ''}`,
-      })
-      return
-    }
-
-    setStatus({
-      kind: 'success',
-      message: `${siteName} 사이트로 현재 탭을 이동했습니다.`,
-    })
-    setStep('crawl')
+    setStatus(DEFAULT_STATUS)
   }
 
   function handleRangeSettingChange(key: 'mode' | 'startPage' | 'endPage', value: string): void {
     setRangeCrawlSettings((current) => ({ ...current, [activeSiteId]: { ...current[activeSiteId], [key]: value } }))
   }
 
-  async function handleCrawl(): Promise<void> {
-    if (isCrawling) return
-    if (!activeSiteId) {
-      setStatus({ kind: 'error', message: '먼저 대상 사이트를 선택해주세요.' })
-      return
-    }
+  useEffect(() => {
+    if (!resultFocusRef.current || isCrawling || view !== 'results') return
+    resultFocusRef.current = false
+    document.getElementById('list-heading')?.focus()
+    const list = document.querySelector<HTMLElement>('.item-list')
+    if (list) list.scrollTop = 0
+  }, [isCrawling, view])
 
+  async function handleCrawl(): Promise<void> {
+    if (isCrawling || autoCrawlRef.current || isBulkDeleting || pendingDeletion || deletingItemId) return
+    const controller = new AbortController()
+    autoCrawlRef.current = controller
     setIsCrawling(true)
     setIsStoppingCrawl(false)
-    setStatus({ kind: 'loading', message: 'HTML 수집과 파싱을 진행 중입니다...' })
+    try {
+      if (!activeSiteId) throw new Error('먼저 사이트를 선택해주세요.')
+      const targetUrl = activeSiteUrl.trim()
+      let url: URL
+      try { url = new URL(targetUrl) }
+      catch { throw new Error('사이트 주소를 올바른 URL로 입력해주세요.') }
+      if (!['https:', 'http:'].includes(url.protocol)) throw new Error('사이트 주소는 http 또는 https URL이어야 합니다.')
+      if (activeRangeSettings?.mode === 'all') {
+        const start = Number(activeRangeSettings.startPage)
+        const end = activeRangeSettings.endPage.trim() ? Number(activeRangeSettings.endPage) : undefined
+        if (!Number.isSafeInteger(start) || start < 1 || (end !== undefined && (!Number.isSafeInteger(end) || end < start))) {
+          throw new Error('시작 페이지는 1 이상의 정수, 끝 페이지는 시작 페이지 이상의 정수로 입력해주세요.')
+        }
+        if (activeSiteId !== 'kone-pornvideo-hot' && end === undefined) throw new Error('끝 페이지를 입력해주세요.')
+      }
+      setStatus({ kind: 'loading', message: `${activeSiteName} 사이트로 이동하고 새 문서를 확인하고 있습니다...` })
+      const requestId = crypto.randomUUID()
+      preparationRequestRef.current = requestId
+      const opened = await waitForSnapshot(sendRuntimeRequest<OpenTargetSiteResult>({
+        type: 'OPEN_TARGET_SITE', payload: { siteId: activeSiteId, targetUrl, requestId },
+      }), 15_000, controller.signal)
+      preparationRequestRef.current = null
+      controller.signal.throwIfAborted()
+      if (!opened.ok) throw new Error(`${opened.error.message || mapError(opened.error.code)}${opened.error.detail ? ` (${opened.error.detail})` : ''}`)
+      setStatus({ kind: 'loading', message: '페이지 수집·파싱·저장을 진행하고 있습니다...' })
 
-    if (activeRangeSettings?.mode === 'all' ||
-      (activeSiteId === 'twidouga-ranking-t1' && twidougaCrawlMode === 'all') ||
-      (activeSiteId === 'nimi-tw-ranking' && nimiCrawlMode === 'all')) {
-      const controller = new AbortController()
-      autoCrawlRef.current = controller
-      const isKone = activeSiteId === 'kone-pornvideo-hot'
-      const isNimi = activeSiteId === 'nimi-tw-ranking'
-      const isRangeCrawl = !!activeRangeSettings
-      const pageLabel = (page: number) => isNimi ? NIMI_PLATFORM_LABELS[NIMI_PLATFORMS[page - 1]] : isRangeCrawl ? `${page}페이지` : page === 1 ? '1–10위' : '11–20위'
-      try {
+      if (activeRangeSettings?.mode === 'all' ||
+        (activeSiteId === 'twidouga-ranking-t1' && twidougaCrawlMode === 'all') ||
+        (activeSiteId === 'nimi-tw-ranking' && nimiCrawlMode === 'all')) {
+        const isKone = activeSiteId === 'kone-pornvideo-hot'
+        const isNimi = activeSiteId === 'nimi-tw-ranking'
+        const isRangeCrawl = !!activeRangeSettings
+        const pageLabel = (page: number) => isNimi ? NIMI_PLATFORM_LABELS[NIMI_PLATFORMS[page - 1]] : isRangeCrawl ? `${page}페이지` : page === 1 ? '1–10위' : '11–20위'
         const options = {
-          targetUrl: activeSiteUrl.trim(), captureFailurePayload, signal: controller.signal,
+          tabId: opened.data.tabId, documentId: opened.data.documentId, targetUrl, captureFailurePayload, signal: controller.signal,
           onProgress: (progress: AutoCrawlProgress) => setStatus({
-            kind: 'loading',
-            message: `${pageLabel(progress.page)} ${controller.signal.aborted ? '중지 중' : '확인 중'} · ${progress.completedPages}페이지 처리 · 신규 ${progress.insertedCount}건 저장 · 정확 중복 ${progress.duplicateCount}건`,
+            kind: 'loading', message: `${pageLabel(progress.page)} ${controller.signal.aborted ? '중지 중' : '확인 중'} · ${progress.completedPages}페이지 처리 · 신규 ${progress.insertedCount}건 저장 · 정확 중복 ${progress.duplicateCount}건`,
           }),
         }
         const result = await (isNimi ? crawlNimiPlatforms({ ...options, onProgress: (progress) => setStatus({
           kind: 'loading', message: `${pageLabel(progress.page)} 확인 중 · ${progress.completedPages}/4개 플랫폼 처리 · 신규 ${progress.insertedCount}건 저장 · 정확 중복 ${progress.duplicateCount}건${progress.failures.length ? ` · 실패 ${progress.failures.join(' · ')}` : ''}`,
-        }) }) : isRangeCrawl ? crawlRangePages({
-          ...options, siteId: activeSiteId, startPage: Number(activeRangeSettings.startPage),
-          endPage: activeRangeSettings.endPage.trim() ? Number(activeRangeSettings.endPage) : undefined,
+        }) }) : isRangeCrawl ? crawlRangePages({ ...options, siteId: activeSiteId,
+          startPage: Number(activeRangeSettings.startPage), endPage: activeRangeSettings.endPage.trim() ? Number(activeRangeSettings.endPage) : undefined,
         }) : crawlTwidougaPages(options))
         const successLabel = isNimi ? '4개 플랫폼 주간 수집 완료' : isRangeCrawl
           ? isKone && activeRangeSettings.startPage === '1' && !activeRangeSettings.endPage.trim()
-            ? '전체 수집 완료' : `범위 수집 완료 (${activeRangeSettings.startPage}–${result.progress.page}페이지)`
-          : '1–20위 수집 완료'
-        const label = result.status === 'success' ?
-          successLabel
-          : result.status === 'stopped' ? '수집 중지'
-            : isNimi ? '4개 플랫폼 수집 일부 완료' : `${pageLabel(result.progress.page)}에서 ${result.progress.completedPages ? '일부 완료' : '수집 실패'}`
-        setStatus({
-          kind: result.status === 'success' ? 'success' : result.status === 'stopped' || result.progress.completedPages > 0 ? 'warning' : 'error',
+            ? '전체 수집 완료' : `범위 수집 완료 (${activeRangeSettings.startPage}–${result.progress.page}페이지)` : '1–20위 수집 완료'
+        const label = result.status === 'success' ? successLabel : result.status === 'stopped' ? '수집 중지'
+          : isNimi ? `4개 플랫폼 수집 ${result.progress.completedPages ? '일부 완료' : '실패'}`
+          : `${pageLabel(result.progress.page)}에서 ${result.progress.completedPages ? '일부 완료' : '수집 실패'}`
+        setStatus({ kind: result.status === 'success' ? 'success' : result.status === 'stopped' || result.progress.completedPages > 0 ? 'warning' : 'error',
           message: `${label} · ${result.progress.completedPages}${isNimi ? '/4개 플랫폼' : '페이지'} 처리 · 신규 ${result.progress.insertedCount}건 저장 · 정확 중복 ${result.progress.duplicateCount}건${result.progress.rejectedCount ? ` · 탈락 ${result.progress.rejectedCount}건` : ''}${result.detail ? ` · ${result.detail}` : ''}`,
         })
-        if (result.status === 'success') setStep('list')
-      } finally {
-        autoCrawlRef.current = null
-        setIsCrawling(false)
-        setIsStoppingCrawl(false)
+      } else {
+        const response = await sendRuntimeRequest<CrawlSummary>({ type: 'CRAWL_ACTIVE_TAB', payload: {
+          siteId: activeSiteId, targetUrl, captureFailurePayload, tabId: opened.data.tabId,
+          expectedTabUrl: opened.data.url, expectedDocumentId: opened.data.documentId,
+        } })
+        if (!response.ok) throw new Error(`${response.error.message || mapError(response.error.code)}${response.error.detail ? ` (${response.error.detail})` : ''}`)
+        setStatus({ kind: controller.signal.aborted || response.data.status === 'partial' ? 'warning' : 'success',
+          message: `${controller.signal.aborted ? '수집 중지 · ' : response.data.status === 'partial' ? '일부 완료 · ' : '수집 완료 · '}${response.data.parsedCount}건 파싱, 신규 ${response.data.insertedCount}건 저장 / 정확 중복 ${response.data.exactDuplicateCount}건 / 탈락 ${response.data.rejectedCount}건입니다.`,
+        })
       }
-      return
-    }
-
-    const response = await sendRuntimeRequest<CrawlSummary>({
-      type: 'CRAWL_ACTIVE_TAB',
-      payload: {
-        siteId: activeSiteId,
-        targetUrl: activeSiteUrl.trim(),
-        captureFailurePayload,
-      },
-    })
-
-    setIsCrawling(false)
-
-    if (!response.ok) {
-      setStatus({
-        kind: 'error',
-        message: `${mapError(response.error.code)}${response.error.detail ? ` (${response.error.detail})` : ''}`,
+    } catch (error) {
+      setStatus({ kind: controller.signal.aborted ? 'warning' : 'error',
+        message: controller.signal.aborted ? '수집 중지 · 이미 저장된 결과는 유지됩니다.' : error instanceof Error ? error.message : '크롤링에 실패했습니다. 다시 시도해주세요.',
       })
-      return
+    } finally {
+      if (preparationRequestRef.current) void sendRuntimeRequest({ type: 'CANCEL_TARGET_SITE', payload: { requestId: preparationRequestRef.current } })
+      preparationRequestRef.current = null
+      autoCrawlRef.current = null
+      setIsCrawling(false)
+      setIsStoppingCrawl(false)
+      resultFocusRef.current = true
+      setNimiSourceFilter('')
+      setView('results')
     }
-
-    if (response.data.status === 'partial') {
-      setStatus({
-        kind: 'warning',
-        message: `${response.data.parsedCount}건 파싱, 신규 ${response.data.insertedCount}건 저장 / 정확 중복 ${response.data.exactDuplicateCount}건 / 탈락 ${response.data.rejectedCount}건입니다.`,
-      })
-      return
-    }
-
-    setStatus({
-      kind: 'success',
-      message: `${response.data.parsedCount}건 파싱, 신규 ${response.data.insertedCount}건 저장 / 정확 중복 ${response.data.exactDuplicateCount}건 제외했습니다.`,
-    })
-    setStep('list')
   }
 
   async function handleDiagnosticCaptureChange(enabled: boolean): Promise<void> {
@@ -716,11 +706,17 @@ function App() {
   }, [])
 
   const renderedItems = useMemo(() => {
+    if (!library || library.error) {
+      return <li className="empty-row" aria-busy={!library}>
+        <p>{library?.error ?? '저장 결과를 불러오는 중...'}</p>
+        {library?.error ? <p>패널을 다시 열어 저장 결과를 확인해주세요.</p> : <div className="loading-preview" aria-hidden="true" />}
+      </li>
+    }
     if (items.length === 0) {
       return (
         <li className="empty-row">
           <p>{activeSourceFilter ? `${NIMI_PLATFORM_LABELS[activeSourceFilter]}에 저장된 항목이 없습니다.` : '아직 저장된 항목이 없습니다.'}</p>
-          <p>{activeSourceFilter ? '다른 출처를 선택하거나 이 사이트를 수집하세요.' : '아래의 ‘이 사이트 수집’으로 항목을 추가하세요.'}</p>
+          <p>{activeSourceFilter ? '다른 출처를 선택하거나 이 사이트를 수집하세요.' : '크롤링 설정에서 이 사이트의 항목을 수집하세요.'}</p>
         </li>
       )
     }
@@ -728,6 +724,9 @@ function App() {
     return items.map((item, index) => {
       const sourcePlatform = getItemSourcePlatform(item)
       const titleLinkUrl = getTitleLinkUrl(item)
+      const videoPageUrl = getNimiVideoPageUrl(item)
+      const videoLinkUrl = videoPageUrl ?? item.url
+      const videoLinkLabel = videoPageUrl ? '영상 미리보기' : '영상 열기'
 
       return (
         <li key={item.id} className={`item-row${selectedItemIds.has(item.id) ? ' item-row-selected' : ''}`}>
@@ -737,20 +736,27 @@ function App() {
                 checked={selectedItemIds.has(item.id)} disabled={isBulkDeleting || !!pendingDeletion}
                 onChange={(event) => handleSelectItem(item.id, event.target.checked)} />
             </label>
+            <a
+              href={titleLinkUrl}
+              className="item-title"
+              title={`${item.title}\n${titleLinkUrl}`}
+              onClick={(event) => {
+                handleItemLinkClick(event, titleLinkUrl)
+              }}
+              onAuxClick={(event) => {
+                handleItemLinkAuxClick(event, titleLinkUrl)
+              }}
+            >
+              {item.title}
+            </a>
+            {!isPrivacyMode ? (
+              <div className="item-media">
+                {item.previewImageUrl ? (
+                  <CachedThumbnail itemId={item.id} sourceUrl={item.previewImageUrl} title={item.title} />
+                ) : <div className="item-preview item-preview-empty">미리보기 없음</div>}
+              </div>
+            ) : null}
             <div className="item-content">
-              <a
-                href={titleLinkUrl}
-                className="item-title"
-                title={`${item.title}\n${titleLinkUrl}`}
-                onClick={(event) => {
-                  handleItemLinkClick(event, titleLinkUrl)
-                }}
-                onAuxClick={(event) => {
-                  handleItemLinkAuxClick(event, titleLinkUrl)
-                }}
-              >
-                {item.title}
-              </a>
               {item.siteId === 'nimi-tw-ranking' ? (
                 <span className="meta-tag source-platform">NimiWiki · {sourcePlatform ? NIMI_PLATFORM_LABELS[sourcePlatform] : '출처 미확인'}</span>
               ) : null}
@@ -759,26 +765,21 @@ function App() {
                   {item.summary}
                 </span>
               ) : null}
-              <time className="item-date" dateTime={new Date(item.crawledAt).toISOString()}
-                title={`수집: ${formatDateTime(item.crawledAt)}`} aria-label={`수집: ${formatDateTime(item.crawledAt)}`}>
-                {ITEM_DATE_FORMATTER.format(item.crawledAt)}
-              </time>
-            </div>
-            {!isPrivacyMode || titleLinkUrl !== item.url ? (
-              <div className="item-media">
-                {!isPrivacyMode ? item.previewImageUrl ? (
-                  <CachedThumbnail itemId={item.id} sourceUrl={item.previewImageUrl} title={item.title} />
-                ) : <div className="item-preview item-preview-empty">No Image</div> : null}
-                {titleLinkUrl !== item.url ? (
-                  <a href={item.url} className="item-url" title={item.url}
-                    aria-label={`${item.title} 영상 열기`}
-                    onClick={(event) => handleItemLinkClick(event, item.url)}
-                    onAuxClick={(event) => handleItemLinkAuxClick(event, item.url)}>
-                    영상 열기
+              <div className="item-meta">
+                <time className="item-date" dateTime={new Date(item.crawledAt).toISOString()}
+                  title={`수집: ${formatDateTime(item.crawledAt)}`} aria-label={`수집: ${formatDateTime(item.crawledAt)}`}>
+                  {ITEM_DATE_FORMATTER.format(item.crawledAt)}
+                </time>
+                {titleLinkUrl !== videoLinkUrl ? (
+                  <a href={videoLinkUrl} className="item-url" title={videoLinkUrl}
+                    aria-label={`${item.title} ${videoLinkLabel}`}
+                    onClick={(event) => handleItemLinkClick(event, videoLinkUrl)}
+                    onAuxClick={(event) => handleItemLinkAuxClick(event, videoLinkUrl)}>
+                    {videoLinkLabel}
                   </a>
                 ) : null}
               </div>
-            ) : null}
+            </div>
             <button type="button" className="delete-button item-delete" data-item-id={item.id}
               aria-label={`${item.title} ${deletingItemId === item.id ? '삭제 중' : '삭제'}`}
               aria-busy={deletingItemId === item.id}
@@ -786,7 +787,7 @@ function App() {
                 if (event.detail === 0) deleteFocusRef.current = { removedId: item.id, nextId: items[index + 1]?.id ?? items[index - 1]?.id }
                 void handleDeleteItem(item.id)
               }}
-              disabled={!!deletingItemId || isBulkDeleting || !!pendingDeletion}>
+              disabled={isCrawling || !!deletingItemId || isBulkDeleting || !!pendingDeletion}>
               {deletingItemId !== item.id ? (
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
                   <path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6" />
@@ -805,7 +806,9 @@ function App() {
     handleItemLinkAuxClick,
     handleItemLinkClick,
     isPrivacyMode,
+    isCrawling,
     items,
+    library,
     selectedItemIds,
     isBulkDeleting,
     pendingDeletion,
@@ -823,7 +826,7 @@ function App() {
               className="brand-icon"
               aria-hidden="true"
             />
-            <h1>Maltlock Crawler</h1>
+            <h1>Maltlock</h1>
           </div>
           <button type="button" className={`privacy-toggle ${isPrivacyMode ? 'privacy-toggle-on' : ''}`}
             aria-pressed={isPrivacyMode} disabled={isTogglingPrivacyMode}
@@ -833,40 +836,52 @@ function App() {
         </div>
       </header>
 
-      <nav className="step-nav" aria-label="수집 단계">
-        {([['target', '대상 선택'], ['crawl', '수집 실행'], ['list', '저장 목록']] as const).map(([value, label], index) => (
-          <button key={value} type="button" aria-current={step === value ? 'step' : undefined}
-            aria-controls={`step-${value}`} onClick={() => setStep(value)}>
-            <span className="step-number">{index + 1}</span>{label}
-            {value === 'crawl' && isCrawling ? <span className="running-dot" aria-label="수집 진행 중" /> : null}
+      <div className="site-grid" role="group" aria-label="사이트 선택">
+        {targetSites.map((site) => (
+          <button key={site.id} type="button" className={`chip ${activeSiteId === site.id ? 'chip-active' : ''}`}
+            aria-pressed={activeSiteId === site.id} disabled={isCrawling || isBulkDeleting || !!pendingDeletion}
+            onClick={() => handleSelectSite(site.id)}>
+            <span className="chip-label">{site.name}</span>
+            <span className="chip-count">{itemCountsBySite[site.id] ?? 0}건</span>
+          </button>
+        ))}
+      </div>
+      <nav className="view-nav" role="tablist" aria-label="몰트락 화면">
+        {([['results', '수집결과', 'step-list'], ['crawl', '크롤링', 'step-crawl']] as const).map(([value, label, panelId]) => (
+          <button key={value} id={`tab-${value}`} type="button" role="tab" aria-selected={view === value}
+            aria-controls={panelId} tabIndex={view === value ? 0 : -1} onClick={() => setView(value)}
+            onKeyDown={(event) => {
+              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+              event.preventDefault()
+              const next = event.key === 'Home' ? 'results' : event.key === 'End' ? 'crawl' : value === 'results' ? 'crawl' : 'results'
+              setView(next)
+              document.getElementById(`tab-${next}`)?.focus()
+            }}>
+            {label}{value === 'crawl' && isCrawling ? <span className="running-dot" aria-label="수집 진행 중" /> : null}
           </button>
         ))}
       </nav>
-
+      <div className="execution-status">
+        {status.kind !== 'idle' && view === 'results' ? (
+          <details className="status-disclosure" open={status.kind === 'error' || status.kind === 'warning'}>
+            <summary><span className={`status-line status-${status.kind}`} role="status" aria-live="polite">
+              <span className="status-label">{STATUS_LABEL_BY_KIND[status.kind]}</span>
+              <span className="status-preview">{status.message}</span>
+            </span></summary>
+            <p>{status.message}</p>
+          </details>
+        ) : status.kind !== 'idle' ? (
+          <p className={`status-line status-${status.kind}`} role="status" aria-live="polite">
+            <span className="status-label">{STATUS_LABEL_BY_KIND[status.kind]}</span><span>{status.message}</span>
+          </p>
+        ) : null}
+      </div>
       <div className="step-body">
-      <section id="step-target" className="section-block step-page" hidden={step !== 'target'} aria-labelledby="target-heading">
+      <section id="step-crawl" className="section-block step-page" hidden={view !== 'crawl'} role="tabpanel" aria-labelledby="tab-crawl">
         <div className="section-heading">
-          <h2 id="target-heading">어디에서 수집할까요?</h2>
-          <p>사이트를 선택하면 현재 탭에서 열고 수집 설정으로 이동합니다.</p>
-        </div>
-        <div className="site-grid">
-          {targetSites.map((site) => (
-            <button
-              key={site.id}
-              type="button"
-              className={`chip ${activeSiteId === site.id ? 'chip-active' : ''}`}
-              aria-pressed={activeSiteId === site.id}
-              disabled={isCrawling}
-              onClick={() => {
-                void handleOpenSite(site.id)
-              }}
-            >
-              <span className="chip-label">{site.name}</span>
-              <span className="chip-count">
-                {itemCountsBySite[site.id] ?? 0}건
-              </span>
-            </button>
-          ))}
+          <h2 id="crawl-heading">{activeSiteName} 크롤링</h2>
+          <p>시작하면 현재 탭을 사이트로 이동합니다. 결과는 페이지마다 저장합니다.</p>
+          <p className="crawl-address" title={activeSiteUrl}>{activeSiteUrl}</p>
         </div>
         {activeSite ? (
           <details className="site-settings">
@@ -902,28 +917,12 @@ function App() {
           </div>
           </details>
         ) : null}
-        <div className="target-library">
-          <span>이미 저장한 항목이 있나요?</span>
-          <button type="button" className="text-button" onClick={() => setStep('list')}>저장 목록 바로 보기</button>
-        </div>
-      </section>
-
-      <section id="step-crawl" className="section-block step-page" hidden={step !== 'crawl'} aria-labelledby="crawl-heading">
-        <div className="section-heading">
-          <h2 id="crawl-heading">{activeSiteName} 수집</h2>
-          <p>범위를 확인하고 수집을 시작하세요. 결과는 페이지마다 저장합니다.</p>
-        </div>
-        <div className="source-summary">
-          <span title={activeSiteUrl}>{activeSiteUrl}</span>
-          <button type="button" className="text-button" disabled={isCrawling}
-            onClick={() => setStep('target')}>대상 변경</button>
-        </div>
         {activeRangeSettings ? (
           <div className="site-url-editor">
             <label className="site-url-label" htmlFor="range-crawl-mode">{activeSiteId === 'kone-pornvideo-hot' ? '코네' : activeSiteName} 수집 범위</label>
             <select id="range-crawl-mode" className="site-url-input" value={activeRangeSettings.mode}
               disabled={isCrawling} onChange={(event) => handleRangeSettingChange('mode', event.target.value)}>
-              <option value="current">현재 페이지</option>
+              <option value="current">단일 페이지</option>
               <option value="all">{activeSiteId === 'kone-pornvideo-hot' ? '인기글 페이지 범위 자동 수집' : '페이지 범위 자동 수집'}</option>
             </select>
             {activeRangeSettings.mode === 'all' ? (
@@ -946,7 +945,7 @@ function App() {
             <label className="site-url-label" htmlFor="twidouga-crawl-mode">TwiDouga 수집 범위</label>
             <select id="twidouga-crawl-mode" className="site-url-input" value={twidougaCrawlMode}
               disabled={isCrawling} onChange={(event) => setTwidougaCrawlMode(event.target.value)}>
-              <option value="current">현재 페이지</option>
+              <option value="current">단일 페이지</option>
               <option value="all">1–20위 자동 수집</option>
             </select>
             {twidougaCrawlMode === 'all' ? (
@@ -960,7 +959,7 @@ function App() {
             <select id="nimi-crawl-mode" className="site-url-input" value={nimiCrawlMode} disabled={isCrawling}
               onChange={(event) => setNimiCrawlMode(event.target.value)}>
               <option value="all">4개 플랫폼 주간 인기 자동 수집</option>
-              <option value="current">현재 목록 수집</option>
+              <option value="current">단일 목록 수집</option>
             </select>
             {nimiCrawlMode === 'all' ? <p className="crawl-hint">트위터 → 인스타그램 → 틱톡 → 블루스카이의 조회수 기준 주간 인기 목록을 순환합니다. 패널과 NimiWiki 탭을 열어 두세요.</p> : null}
           </div>
@@ -1036,17 +1035,13 @@ function App() {
         </details>
       </section>
 
-      <section id="step-list" className="section-block list-block" hidden={step !== 'list'} aria-labelledby="list-heading">
+      <section id="step-list" className="section-block list-block" hidden={view !== 'results'} role="tabpanel" aria-labelledby="tab-results">
         <div className="list-header">
           <div className="section-heading">
-            <h2 id="list-heading" tabIndex={-1}>저장 목록</h2>
-            <p>{visibleCount}건</p>
+            <h2 id="list-heading" tabIndex={-1}>수집결과</h2>
+            <p>{activeSiteName} · {visibleCount}건</p>
           </div>
           <div className="list-controls">
-            <select aria-label="목록 사이트" className="site-url-input" value={activeSiteId} disabled={isCrawling || isBulkDeleting}
-              onChange={(event) => setActiveSiteId(event.target.value)}>
-              {targetSites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
-            </select>
             {activeSiteId === 'nimi-tw-ranking' ? <select aria-label="NimiWiki 출처 필터" className="site-url-input"
               value={nimiSourceFilter} disabled={isBulkDeleting} onChange={(event) => setNimiSourceFilter(event.target.value as NimiPlatform | '')}>
               <option value="">전체 출처</option>
@@ -1076,40 +1071,24 @@ function App() {
         <div className="list-footer">
           <span>{visibleCount > items.length ? `${items.length} / ${visibleCount}건 표시` : `전체 저장: ${totalStoredItemCount}건`}</span>
           <button type="button" className="text-button" disabled={isCrawling || isBulkDeleting}
-            onClick={() => void handleOpenSite(activeSiteId)}>이 사이트 수집</button>
+            onClick={() => setView('crawl')}>크롤링 설정</button>
         </div>
       </section>
       </div>
 
       <footer className="workflow-footer">
-        {status.kind !== 'idle' && step === 'list' ? (
-          <details className="status-disclosure">
-            <summary><span className={`status-line status-${status.kind}`} role="status" aria-live="polite">
-              <span className="status-label">{STATUS_LABEL_BY_KIND[status.kind]}</span>
-              <span className="status-preview">{status.message}</span>
-            </span></summary>
-            <p>{status.message}</p>
-          </details>
-        ) : status.kind !== 'idle' ? (
-          <p className={`status-line status-${status.kind}`} role="status" aria-live="polite">
-            <span className="status-label">{STATUS_LABEL_BY_KIND[status.kind]}</span><span>{status.message}</span>
-          </p>
-        ) : null}
         {isCrawling && autoCrawlRef.current ? (
           <button type="button" className="crawl-button crawl-stop" disabled={isStoppingCrawl}
             onClick={() => { setIsStoppingCrawl(true); autoCrawlRef.current?.abort() }}>
-            {isStoppingCrawl ? '현재 페이지 처리 후 중지 중...' : '자동 수집 중지'}
+            {isStoppingCrawl ? '현재 작업 처리 후 중지 중...' : '수집 중지'}
           </button>
         ) : null}
-        {step === 'target' ? (
-          <button type="button" className="crawl-button" disabled={isCrawling || isBulkDeleting}
-            onClick={() => void handleOpenSite(activeSiteId)}>사이트 열고 다음</button>
-        ) : step === 'crawl' ? (
-          <div className="step-actions">
-            <button type="button" className="crawl-button" disabled={isCrawling || isBulkDeleting || !!pendingDeletion}
-              onClick={() => void handleCrawl()}>{isCrawling ? '크롤링 중...' : '지금 크롤 실행'}</button>
-            <button type="button" className="site-url-reset" onClick={() => setStep('list')}>저장 목록 보기</button>
-          </div>
+        {view === 'crawl' && !isCrawling ? (
+          <button type="button" className="crawl-button" disabled={isBulkDeleting || !!pendingDeletion || !!deletingItemId}
+            onClick={() => void handleCrawl()}>크롤링 시작</button>
+        ) : null}
+        {view === 'results' && !isCrawling && (status.kind === 'error' || status.kind === 'warning') ? (
+          <button type="button" className="site-url-reset" onClick={() => setView('crawl')}>설정 확인하고 다시 수집</button>
         ) : null}
       </footer>
       {pendingDeletion ? (

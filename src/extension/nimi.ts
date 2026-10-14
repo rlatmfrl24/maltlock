@@ -37,6 +37,18 @@ export function getItemSourcePlatform(item: Pick<CrawledItem, 'siteId' | 'source
   return undefined
 }
 
+export function getNimiVideoPageUrl(item: Pick<CrawledItem, 'siteId' | 'sourcePlatform' | 'url' | 'summary' | 'previewImageUrl' | 'dedupeKey' | 'identities'>): string | undefined {
+  if (getItemSourcePlatform(item) !== 'bs') return undefined
+  const keys = [item.dedupeKey, ...(item.identities ?? [])
+    .filter((identity) => identity.kind === 'source-id' && identity.scope === 'site')
+    .map((identity) => identity.value)]
+  for (const key of keys) {
+    const id = key?.match(/^nimi:bs:item:([a-zA-Z0-9_-]+)$/)?.[1]
+    if (id) return `https://video1.nimi.wiki/watch/${id}`
+  }
+  return undefined
+}
+
 export type NimiView = 'ranking' | 'realtime' | 'recent'
 export type NimiPeriod = 'hourly' | 'daily' | 'weekly' | 'monthly' | 'yearly'
 type NimiApiPeriod = 'hour' | 'day' | 'week' | 'month' | 'year'
@@ -67,6 +79,21 @@ const API_PERIOD_BY_PERIOD: Record<NimiPeriod, NimiApiPeriod> = {
   weekly: 'week',
   monthly: 'month',
   yearly: 'year',
+}
+
+export function normalizeNimiUrl(input: string): URL {
+  const url = new URL(input)
+  const platform = getNimiPlatform(input)
+  if (!platform || !CURRENT_NIMI_HOSTS.has(url.hostname)) return url
+  url.hostname = 'video1.nimi.wiki'
+  const routePeriod = url.pathname.match(/^\/(?:tw|ig|tt|bs)\/ranking\/([^/]+)\/?$/)?.[1]
+  const period = routePeriod && Object.hasOwn(PERIOD_BY_QUERY_VALUE, routePeriod) ? PERIOD_BY_QUERY_VALUE[routePeriod] : undefined
+  if (period) {
+    url.pathname = `/${platform}/ranking`
+    if (!url.searchParams.has('sort')) url.searchParams.set('sort', 'plays')
+    url.searchParams.set('period', API_PERIOD_BY_PERIOD[period])
+  }
+  return url
 }
 
 function stripHtmlTags(input: string): string {

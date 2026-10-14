@@ -12,7 +12,7 @@ it.each(['success', 'timeout', 'pending', 'stopped', 'moved', 'moved-before', 'm
   const signal = new AbortController()
   const movedAfterSnapshot = mode === 'moved-after-snapshot' || mode === 'pending-after-snapshot'
   const preventedNavigation = mode === 'moved-before' || movedAfterSnapshot
-  let url = movedAfterSnapshot ? 'https://video1.nimi.wiki/ig/new' : targetUrl
+  let url = targetUrl
   let document = 0
   let pendingUrl: string | undefined
   let lostBefore = false
@@ -50,12 +50,12 @@ it.each(['success', 'timeout', 'pending', 'stopped', 'moved', 'moved-before', 'm
     } },
   })
   let result: Awaited<ReturnType<typeof crawlNimiPlatforms>> | undefined
-  const task = crawlNimiPlatforms({ targetUrl, captureFailurePayload: false, signal: signal.signal, onProgress: () => {} })
+  const task = crawlNimiPlatforms({ targetUrl, tabId: 9, documentId: 'document-0', captureFailurePayload: false, signal: signal.signal, onProgress: () => {} })
     .then((value) => { result = value })
   await vi.advanceTimersByTimeAsync(25_000)
   expect(result?.status).toBe(mode === 'success' ? 'success' : mode === 'stopped' ? 'stopped' : 'partial')
   await task
-  expect(visits).toEqual(preventedNavigation ? [] : mode === 'moved' || mode === 'stopped' ? ['tw'] : mode === 'pending' ? ['tw', 'ig', 'bs'] : ['tw', 'ig', 'tt', 'bs'])
+  expect(visits).toEqual(preventedNavigation || mode === 'moved' || mode === 'stopped' ? [] : mode === 'pending' ? ['ig', 'bs'] : ['ig', 'tt', 'bs'])
   expect(captures).toEqual(preventedNavigation ? [] : mode === 'moved' || mode === 'stopped' ? ['tw'] : mode === 'pending' ? ['tw', 'bs'] : mode === 'timeout' ? ['tw', 'tt', 'bs'] : ['tw', 'ig', 'tt', 'bs'])
   expect(result?.progress.completedPages).toBe(captures.length)
   if (mode === 'timeout') {

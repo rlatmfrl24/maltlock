@@ -156,6 +156,7 @@ export interface CrawlDiagnosticArtifact {
 export interface OpenTargetSitePayload {
   siteId: string
   targetUrl?: string
+  requestId?: string
 }
 
 export interface OpenItemLinkPayload {
@@ -194,6 +195,11 @@ export interface OpenTargetSiteMessage {
   payload: OpenTargetSitePayload
 }
 
+export interface CancelTargetSiteMessage {
+  type: 'CANCEL_TARGET_SITE'
+  payload: { requestId: string }
+}
+
 export interface OpenItemLinkMessage {
   type: 'OPEN_ITEM_LINK'
   payload: OpenItemLinkPayload
@@ -221,6 +227,7 @@ export interface CrawlErrorMessage {
 
 export type RuntimeRequestMessage =
   | OpenTargetSiteMessage
+  | CancelTargetSiteMessage
   | OpenItemLinkMessage
   | CrawlActiveTabMessage
   | SetPrivacyScreenBlurMessage
@@ -231,6 +238,7 @@ export interface OpenTargetSiteResult {
   siteId: string
   tabId: number
   url: string
+  documentId: string
 }
 
 export interface OpenItemLinkResult {
