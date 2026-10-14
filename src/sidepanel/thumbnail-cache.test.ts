@@ -75,4 +75,62 @@ describe('thumbnail cache', () => {
 
     expect(responses.size).toBe(0)
   })
+
+  it('loads the image when Cache Storage is unavailable', async () => {
+    vi.stubGlobal('caches', undefined)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['image'], { type: 'image/png' }))))
+
+    expect((await loadPersistentThumbnail('item-1', 'https://images.test/one.png'))?.type).toBe('image/png')
+  })
+
+  it('returns the downloaded image when the cache write fails', async () => {
+    cache.put.mockRejectedValueOnce(new Error('Quota exceeded'))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['image'], { type: 'image/png' }))))
+
+    expect((await loadPersistentThumbnail('item-1', 'https://images.test/one.png'))?.type).toBe('image/png')
+  })
+
+  it('displays before a slow cache write finishes and removes that write on deletion', async () => {
+    let finishWrite!: () => void
+    let startedWrite!: () => void
+    const started = new Promise<void>((resolve) => { startedWrite = resolve })
+    const heldWrite = new Promise<void>((resolve) => { finishWrite = resolve })
+    cache.put.mockImplementationOnce(async (key, response) => {
+      startedWrite()
+      await heldWrite
+      responses.set(`${key}`, response.clone())
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['image'], { type: 'image/png' }))))
+    const loaded = vi.fn()
+    const loading = loadPersistentThumbnail('item-1', 'https://images.test/one.png').then(loaded)
+    await started
+    try {
+      await vi.waitFor(() => expect(loaded).toHaveBeenCalledWith(expect.objectContaining({ type: 'image/png' })))
+      expect(responses.size).toBe(0)
+      const deleting = removePersistentThumbnail('item-1')
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(cache.delete).not.toHaveBeenCalled()
+      finishWrite()
+      await deleting
+      expect(responses.size).toBe(0)
+    } finally {
+      finishWrite()
+      await loading
+    }
+  })
+
+  it('does not persist a thumbnail after its caller cancels', async () => {
+    let finish!: (response: Response) => void
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { finish = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
+    const pending = loadPersistentThumbnail('item-1', 'https://images.test/one.png', controller.signal)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    controller.abort()
+    finish(new Response(new Blob(['image'], { type: 'image/png' })))
+    await pending
+
+    expect(responses.size).toBe(0)
+  })
 })
