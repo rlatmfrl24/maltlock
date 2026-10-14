@@ -578,6 +578,10 @@ test(`NimiWiki live weekly collection reaches all platforms and persists their A
     const id = await getExtensionId(context)
     const payloads = new Map<string, string>()
     const responseStatuses = new Map<string, number>()
+    let blueskyThumbnailFetches = 0
+    context.on('request', (request) => {
+      if (request.resourceType() === 'fetch' && request.url().startsWith('https://video.bsky.app/')) blueskyThumbnailFetches++
+    })
     const reads: Promise<void>[] = []
     context.on('response', (response) => {
       responseStatuses.set(response.url(), response.status())
@@ -639,6 +643,7 @@ test(`NimiWiki live weekly collection reaches all platforms and persists their A
     await panel.bringToFront()
     const thumbnail = panel.locator('img.item-preview').first()
     await thumbnail.scrollIntoViewIfNeeded()
+    const thumbnailStartedAt = Date.now()
     try {
       await expect.poll(() => thumbnail.evaluate((image: HTMLImageElement) => image.naturalWidth), { timeout: 15_000 }).toBeGreaterThan(0)
     } catch (error) {
@@ -646,6 +651,7 @@ test(`NimiWiki live weekly collection reaches all platforms and persists their A
       console.log('LIVE_NIMI thumbnail failure', { ...state, status: responseStatuses.get(state.src || state.requestedSrc) })
       throw error
     }
+    console.log(`LIVE_NIMI thumbnail: loaded=${Date.now() - thumbnailStartedAt}ms, Bluesky fetches=${blueskyThumbnailFetches}, HTTP 428 responses=${[...responseStatuses.values()].filter((status) => status === 428).length}`)
     await panel.screenshot({ path: testInfo.outputPath(`live-${browserName}-results-400x600.png`) })
     await site.bringToFront()
     const preview = panel.locator('.item-url').first()
@@ -1196,6 +1202,63 @@ test('restores a cached thumbnail after reopening the sidepanel', async () => {
   } finally {
     await context.close()
   }
+})
+
+test('thumbnail requests follow list visibility instead of prefetching the entire library', async () => {
+  const context = await launchExtensionContext()
+  const requested = new Set<string>()
+  let holdFirst = true
+  let releaseFirst: (() => void) | undefined
+  await context.route('https://images.test/visibility-*.png', async (route) => {
+    requested.add(route.request().url())
+    if (holdFirst && route.request().url().endsWith('visibility-39.png')) {
+      await new Promise<void>((resolve) => { releaseFirst = resolve })
+    }
+    await route.fulfill({ contentType: 'image/png', body: readFileSync(path.join(resolveExtensionDistPath(), 'icons/maltlock-128.png')) }).catch(() => undefined)
+  })
+  try {
+    const id = await getExtensionId(context)
+    const panel = await context.newPage()
+    await panel.setViewportSize({ width: 400, height: 600 })
+    await panel.goto(`chrome-extension://${id}/sidepanel.html`)
+    await resetExtensionData(panel)
+    await panel.evaluate(async () => {
+      const database = await new Promise<IDBDatabase>((resolve) => {
+        const request = indexedDB.open('maltlock-db')
+        request.onsuccess = () => resolve(request.result)
+      })
+      const transaction = database.transaction('items', 'readwrite')
+      for (let index = 0; index < 40; index++) transaction.objectStore('items').put({
+        id: `visibility-${index}`, siteId: 'nimi-tw-ranking', sourcePlatform: 'bs', title: `Visible thumbnail ${index}`,
+        url: `https://bsky.app/profile/example.test/post/${index}`, previewImageUrl: `https://images.test/visibility-${index}.png`,
+        crawledAt: Date.now() + index, dedupeKey: `visibility-${index}`,
+      })
+      await new Promise<void>((resolve) => { transaction.oncomplete = () => resolve() })
+      database.close()
+    })
+    await panel.reload()
+    await panel.getByRole('tab', { name: '크롤링', exact: true }).click()
+    await panel.getByRole('button', { name: 'NimiWiki', exact: false }).click()
+    await expect(panel.locator('.item-row')).toHaveCount(40)
+    expect(requested.size).toBe(0)
+    const firstRequest = context.waitForEvent('request', { predicate: (request) => request.url().endsWith('visibility-39.png') })
+    await panel.getByRole('tab', { name: '수집결과', exact: true }).click()
+    await firstRequest
+    await expect.poll(() => requested.size).toBeGreaterThan(0)
+    expect(requested.size).toBeLessThan(40)
+    const cancelled = context.waitForEvent('requestfailed', { predicate: (request) => request.url().endsWith('visibility-39.png'), timeout: 3_000 })
+    const last = panel.locator('.item-row').last().locator('img.item-preview')
+    await last.scrollIntoViewIfNeeded()
+    await cancelled
+    holdFirst = false
+    releaseFirst?.()
+    await expect.poll(() => last.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(128)
+    expect(requested.has('https://images.test/visibility-0.png')).toBe(true)
+    await expect.poll(() => panel.evaluate(async () => (await (await caches.open('maltlock-thumbnails-v1')).keys()).length)).toBeGreaterThan(0)
+    const first = panel.locator('img.item-preview').first()
+    await first.scrollIntoViewIfNeeded()
+    await expect.poll(() => first.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(128)
+  } finally { releaseFirst?.(); await context.close() }
 })
 
 test('Kone collects the current list after navigation and deduplicates shifted articles', async () => {
